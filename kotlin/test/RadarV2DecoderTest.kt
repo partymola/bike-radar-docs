@@ -12,20 +12,20 @@ class RadarV2DecoderTest {
     private val decoder = RadarV2Decoder(nowMs = { clock })
 
     private fun packTarget(
-        tid: Int, cls: Int, rxRaw: Int, ryRaw: Int,
-        lengthRaw: Int = 0, widthRaw: Int = 0, sxRaw: Int = 0, syRaw: Int = 0,
+        tid: Int, cls: Int, b2: Int, zone: Int, rxInt8: Int = 0,
+        lengthRaw: Int = 0, widthRaw: Int = 0, syRaw: Int = 0, sentinel: Int = 0x80,
     ): ByteArray {
-        val r24 = ((ryRaw and 0x1FFF) shl 11) or (rxRaw and 0x07FF)
+        val b3 = (zone - 1) and 0x07
         return byteArrayOf(
             tid.toByte(),
             cls.toByte(),
-            ((r24 shr 16) and 0xFF).toByte(),
-            ((r24 shr 8) and 0xFF).toByte(),
-            (r24 and 0xFF).toByte(),
+            (b2 and 0xFF).toByte(),
+            b3.toByte(),
+            rxInt8.toByte(),
             lengthRaw.toByte(),
             widthRaw.toByte(),
-            sxRaw.toByte(),
             syRaw.toByte(),
+            sentinel.toByte(),
         )
     }
 
@@ -51,24 +51,24 @@ class RadarV2DecoderTest {
 
     @Test fun single_target_decodes_range_and_speed() {
         clock = 1000
-        // rx_raw=100 -> 10m lateral, ry_raw=500 -> 50m longitudinal, sy_raw=20 -> 10 m/s approaching
-        val payload = packFrame(0x0000, listOf(packTarget(5, 23, 100, 500, sxRaw = 2, syRaw = 20)))
+        // b2=244, zone=1 -> 25.6 + 24.4 = 50.0 m; rx=15 -> 1.5 m; sy=-20 -> -10 m/s approaching
+        val payload = packFrame(0x0000, listOf(packTarget(5, 23, b2 = 244, zone = 1, rxInt8 = 15, syRaw = -20)))
         val state = decoder.feed(payload)
         assertNotNull(state)
         assertEquals(1, state!!.vehicles.size)
         val v = state.vehicles[0]
         assertEquals(5, v.id)
         assertEquals(50, v.distanceM)
-        assertEquals(10, v.speedMs)
+        assertEquals(-10, v.speedMs)
         assertEquals(DataSource.V2, state.source)
     }
 
     @Test fun multi_target_frame_populates_all() {
         clock = 1000
         val payload = packFrame(0x0000, listOf(
-            packTarget(1, 23, -50, 400, syRaw = 20),
-            packTarget(2, 36, 0, 100, syRaw = 10),
-            packTarget(3, 13, 20, 200, syRaw = 4),
+            packTarget(1, 23, b2 = 144, zone = 1, rxInt8 = -50, syRaw = -20),  // 40.0 m
+            packTarget(2, 36, b2 = 100, zone = 0, syRaw = -10),                 // 10.0 m
+            packTarget(3, 13, b2 = 200, zone = 0, rxInt8 = 20, syRaw = -4),     // 20.0 m
         ))
         val state = decoder.feed(payload)
         assertNotNull(state)
@@ -78,46 +78,39 @@ class RadarV2DecoderTest {
         assertEquals(listOf(10, 20, 40), state.vehicles.map { it.distanceM })
     }
 
-    @Test fun negative_rangeY_still_produces_positive_distance() {
+    @Test fun zone_0_and_1_span_correct_distances() {
         clock = 1000
-        // ry_raw = -200 -> -20 m; distance reported as |ry| = 20
-        val payload = packFrame(0x0000, listOf(packTarget(1, 16, 0, -200, syRaw = 4)))
+        val payload = packFrame(0x0000, listOf(
+            packTarget(1, 23, b2 = 255, zone = 0),  //  25.5 m, rounds to 25
+            packTarget(2, 23, b2 = 0,   zone = 1),  //  25.6 m, rounds to 25
+            packTarget(3, 23, b2 = 100, zone = 2),  //  61.2 m, rounds to 61
+        ))
         val state = decoder.feed(payload)
-        assertNotNull(state)
-        assertEquals(20, state!!.vehicles[0].distanceM)
+        assertEquals(listOf(25, 25, 61), state!!.vehicles.map { it.distanceM })
     }
 
-    @Test fun rangeY_max_positive_boundary() {
+    @Test fun zone_7_reaches_far_limit() {
         clock = 1000
-        // 13-bit signed max = 4095 -> +409.5 m
-        val payload = packFrame(0x0000, listOf(packTarget(1, 16, 0, 4095, syRaw = 4)))
+        // b2=255, zone=7 -> 179.2 + 25.5 = 204.7 m (top of addressable range)
+        val payload = packFrame(0x0000, listOf(packTarget(1, 16, b2 = 255, zone = 7)))
         val state = decoder.feed(payload)
-        assertNotNull(state)
-        assertEquals(409, state!!.vehicles[0].distanceM)
+        assertEquals(204, state!!.vehicles[0].distanceM)
     }
 
-    @Test fun rangeY_min_negative_boundary() {
+    @Test fun rangeX_independent_of_rangeY() {
         clock = 1000
-        // 13-bit signed min = -4096 -> -409.6 m, distance = 409
-        val payload = packFrame(0x0000, listOf(packTarget(1, 16, 0, -4096, syRaw = 4)))
+        // rangeX from byte[4] only; changing rangeY does not affect it.
+        val payload = packFrame(0x0000, listOf(packTarget(1, 16, b2 = 255, zone = 7, rxInt8 = -30)))
         val state = decoder.feed(payload)
-        assertNotNull(state)
-        assertEquals(409, state!!.vehicles[0].distanceM)
-    }
-
-    @Test fun rangeX_does_not_bleed_into_rangeY() {
-        clock = 1000
-        // Both fields set to their limits; decoded distance comes from rangeY only.
-        val payload = packFrame(0x0000, listOf(packTarget(1, 16, -1024, 4095, syRaw = 4)))
-        val state = decoder.feed(payload)
-        assertNotNull(state)
-        assertEquals(409, state!!.vehicles[0].distanceM)
+        val v = state!!.vehicles[0]
+        assertEquals(204, v.distanceM)
+        assertEquals(-1.0f, v.lateralPos, 0.001f)  // -3.0 m / 3.0 full = -1.0
     }
 
     @Test fun lateral_pos_scales_to_lateral_full_m() {
         clock = 1000
-        // rx_raw=30 -> 3.0 m -> lateralPos = 1.0 (right edge).
-        val payload = packFrame(0x0000, listOf(packTarget(1, 23, 30, 500, syRaw = 20)))
+        // rx=30 -> 3.0 m -> lateralPos = 1.0 (right edge).
+        val payload = packFrame(0x0000, listOf(packTarget(1, 23, b2 = 244, zone = 1, rxInt8 = 30, syRaw = -20)))
         val state = decoder.feed(payload)
         assertNotNull(state)
         assertEquals(1.0f, state!!.vehicles[0].lateralPos, 0.001f)
@@ -125,8 +118,8 @@ class RadarV2DecoderTest {
 
     @Test fun lateral_pos_clamps_at_plus_one() {
         clock = 1000
-        // rx_raw=100 -> 10.0 m lateral, clamps to +1.0.
-        val payload = packFrame(0x0000, listOf(packTarget(1, 23, 100, 500, syRaw = 20)))
+        // rx=100 -> 10.0 m lateral, clamps to +1.0.
+        val payload = packFrame(0x0000, listOf(packTarget(1, 23, b2 = 244, zone = 1, rxInt8 = 100, syRaw = -20)))
         val state = decoder.feed(payload)
         assertNotNull(state)
         assertEquals(1.0f, state!!.vehicles[0].lateralPos, 0.001f)
@@ -134,34 +127,34 @@ class RadarV2DecoderTest {
 
     @Test fun lateral_pos_clamps_at_minus_one() {
         clock = 1000
-        val payload = packFrame(0x0000, listOf(packTarget(1, 23, -100, 500, syRaw = 20)))
+        val payload = packFrame(0x0000, listOf(packTarget(1, 23, b2 = 244, zone = 1, rxInt8 = -100, syRaw = -20)))
         val state = decoder.feed(payload)
         assertNotNull(state)
         assertEquals(-1.0f, state!!.vehicles[0].lateralPos, 0.001f)
     }
 
-    @Test fun speedY_signed_int8_positive() {
+    @Test fun speedY_signed_int8_approaching() {
         clock = 1000
-        // sy_raw=20 -> 10 m/s approaching
-        val payload = packFrame(0x0000, listOf(packTarget(1, 23, 0, 500, syRaw = 20)))
-        val state = decoder.feed(payload)
-        assertNotNull(state)
-        assertEquals(10, state!!.vehicles[0].speedMs)
-    }
-
-    @Test fun speedY_signed_int8_negative() {
-        clock = 1000
-        // sy_raw=-20 -> -10 m/s (vehicle falling behind)
-        val payload = packFrame(0x0000, listOf(packTarget(1, 23, 0, 500, syRaw = -20)))
+        // sy=-20 -> -10 m/s approaching
+        val payload = packFrame(0x0000, listOf(packTarget(1, 23, b2 = 244, zone = 1, syRaw = -20)))
         val state = decoder.feed(payload)
         assertNotNull(state)
         assertEquals(-10, state!!.vehicles[0].speedMs)
     }
 
+    @Test fun speedY_signed_int8_receding() {
+        clock = 1000
+        // sy=20 -> +10 m/s (vehicle falling behind)
+        val payload = packFrame(0x0000, listOf(packTarget(1, 23, b2 = 244, zone = 1, syRaw = 20)))
+        val state = decoder.feed(payload)
+        assertNotNull(state)
+        assertEquals(10, state!!.vehicles[0].speedMs)
+    }
+
     @Test fun length_classifies_as_bike() {
         clock = 1000
         // 4 * 0.25 = 1.0 m length -> BIKE
-        val payload = packFrame(0x0000, listOf(packTarget(1, 23, 0, 500, lengthRaw = 4, syRaw = 10)))
+        val payload = packFrame(0x0000, listOf(packTarget(1, 23, b2 = 244, zone = 1, lengthRaw = 4, syRaw = -10)))
         val state = decoder.feed(payload)
         assertNotNull(state)
         assertEquals(VehicleSize.BIKE, state!!.vehicles[0].size)
@@ -170,7 +163,7 @@ class RadarV2DecoderTest {
     @Test fun length_classifies_as_car() {
         clock = 1000
         // 16 * 0.25 = 4.0 m length -> CAR (between BIKE_MAX_M=2.5 and TRUCK_MIN_M=5.5)
-        val payload = packFrame(0x0000, listOf(packTarget(1, 23, 0, 500, lengthRaw = 16, syRaw = 10)))
+        val payload = packFrame(0x0000, listOf(packTarget(1, 23, b2 = 244, zone = 1, lengthRaw = 16, syRaw = -10)))
         val state = decoder.feed(payload)
         assertNotNull(state)
         assertEquals(VehicleSize.CAR, state!!.vehicles[0].size)
@@ -179,7 +172,7 @@ class RadarV2DecoderTest {
     @Test fun length_classifies_as_truck() {
         clock = 1000
         // 32 * 0.25 = 8.0 m length -> TRUCK
-        val payload = packFrame(0x0000, listOf(packTarget(1, 23, 0, 500, lengthRaw = 32, syRaw = 10)))
+        val payload = packFrame(0x0000, listOf(packTarget(1, 23, b2 = 244, zone = 1, lengthRaw = 32, syRaw = -10)))
         val state = decoder.feed(payload)
         assertNotNull(state)
         assertEquals(VehicleSize.TRUCK, state!!.vehicles[0].size)
@@ -187,8 +180,8 @@ class RadarV2DecoderTest {
 
     @Test fun moving_track_stale_window_is_short() {
         clock = 1000
-        // sy_raw=20 -> 10 m/s (moving)
-        decoder.feed(packFrame(0x0000, listOf(packTarget(5, 23, 0, 500, syRaw = 20))))
+        // sy=-20 -> 10 m/s (moving)
+        decoder.feed(packFrame(0x0000, listOf(packTarget(5, 23, b2 = 244, zone = 1, syRaw = -20))))
         // Past STALE_MOVING_MS -> pruned
         clock = 1000 + RadarV2Decoder.STALE_MOVING_MS + 1
         val state = decoder.feed(packFrame(0x0000, emptyList()))
@@ -198,8 +191,8 @@ class RadarV2DecoderTest {
 
     @Test fun parked_track_stale_window_is_long() {
         clock = 1000
-        // sy_raw=0 -> 0 m/s (parked)
-        decoder.feed(packFrame(0x0000, listOf(packTarget(5, 23, 0, 500, syRaw = 0))))
+        // sy=0 -> 0 m/s (parked)
+        decoder.feed(packFrame(0x0000, listOf(packTarget(5, 23, b2 = 244, zone = 1, syRaw = 0))))
         // Past STALE_MOVING_MS but not STALE_PARKED_MS -> still present
         clock = 1000 + RadarV2Decoder.STALE_MOVING_MS + 100
         val state = decoder.feed(packFrame(0x0000, emptyList()))
@@ -228,7 +221,7 @@ class RadarV2DecoderTest {
     @Test fun trailing_partial_target_ignored() {
         clock = 1000
         // 1 full target + 3 trailing bytes (incomplete second target) -> 1 parsed.
-        val payload = packFrame(0x0000, listOf(packTarget(1, 23, 100, 500, syRaw = 20))) +
+        val payload = packFrame(0x0000, listOf(packTarget(1, 23, b2 = 244, zone = 1, rxInt8 = 10, syRaw = -20))) +
             byteArrayOf(0xAA.toByte(), 0xBB.toByte(), 0xCC.toByte())
         val state = decoder.feed(payload)
         assertNotNull(state)
@@ -237,7 +230,7 @@ class RadarV2DecoderTest {
 
     @Test fun reset_clears_all_tracks() {
         clock = 1000
-        decoder.feed(packFrame(0x0000, listOf(packTarget(5, 23, 0, 500, syRaw = 20))))
+        decoder.feed(packFrame(0x0000, listOf(packTarget(5, 23, b2 = 244, zone = 1, syRaw = -20))))
         decoder.reset()
         clock = 1100
         val state = decoder.feed(packFrame(0x0000, emptyList()))

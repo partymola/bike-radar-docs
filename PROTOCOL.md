@@ -140,24 +140,30 @@ A payload of exactly 2 bytes with no target body is a "heartbeat" and is emitted
 |--------|-------|--------|
 | 0 | `targetId` | uint8 radar-assigned track id |
 | 1 | `targetClass` | enum: `HIGH=36`, `NORMAL=23`, `NORMAL_STABLE=26`, `LOW=16`, `LOW_STABLE=13`, `UNKNOWN=4` |
-| 2 .. 4 | `rangeData` | 24-bit **big-endian** packed field, see below |
+| 2 | `rangeYLow` | uint8, distance within current 25.6 m zone, * 0.1 m |
+| 3 | bits 0..2: `rangeYZone`; bits 3..7: reserved (see below) |
+| 4 | `rangeX` | int8, lateral offset * 0.1 m (+ve = right) |
 | 5 | `lengthMeters` | uint8, multiply by 0.25 for metres |
 | 6 | `widthMeters` | uint8, multiply by 0.25 for metres |
-| 7 | `speedX` | int8, multiply by 0.5 for m/s (lateral velocity, +ve = right) |
-| 8 | `speedY` | int8, multiply by 0.5 for m/s (longitudinal, +ve = approaching) |
+| 7 | `speedY` | int8, multiply by 0.5 for m/s (longitudinal, negative = approaching) |
+| 8 | reserved | observed constant `0x80` across all samples |
 
-The `rangeData` field packs two signed values into 24 bits big-endian:
+**Decoding `rangeY`.** The full longitudinal distance is spread across bytes [2] and the low 3 bits of byte [3]:
 
 ```
-bits 23..11  rangeY  signed 13-bit, * 0.1 m  (longitudinal distance from radar, +ve = behind)
-bits 10..0   rangeX  signed 11-bit, * 0.1 m  (lateral offset, +ve = right of the bike)
+zone       = ((byte[3] & 0x07) + 1) & 0x07       # 0..7
+rangeY_m   = zone * 25.6 + byte[2] * 0.1
 ```
 
-Ranges:
-- `rangeX`: -1024 .. 1023 raw, -102.3 .. +102.3 m after scaling.
-- `rangeY`: -4096 .. 4095 raw, -409.6 .. +409.5 m after scaling.
+byte [2] is a plain uint8 × 0.1 m (0..25.5 m) reporting the distance within the current 25.6 m zone. byte [3] bits 0..2 carry a 3-bit counter that advances by 1 every time the target crosses a 25.6 m boundary: the encoding rotates 7 → 0 → 1 → 2 → … so that zone = 0 (0..25.5 m) reads as `0b111`, zone = 1 (25.6..51.1 m) as `0b000`, zone = 2 (51.2..76.7 m) as `0b001`, and so on up to zone = 7 (179.2..204.7 m). The expression `((b3 & 7) + 1) & 7` inverts that rotation back to the zone index. Eight zones × 25.6 m covers 204.8 m, comfortably within the RearVue 820's 175 m detection range.
 
-Sign conventions (`rangeX` +ve = right, `rangeY` +ve = behind the radar, `speedY` +ve = approaching) are taken from rale/radarble's reading of the protocol and match the physical layout of a rear-facing radar, but have not been independently validated against annotated overtakes. The reference decoders here use `|rangeY|` for rendered distance, so the sign of `rangeY` does not affect the overlay output either way.
+Bytes 3 bits 3..7 change per packet but do not correlate with target position, size, or age in the captures analysed so far. Treat as reserved / do not decode.
+
+**Decoding `rangeX`.** byte [4] is a standalone int8 × 0.1 m, range -12.8..+12.7 m. Positive = vehicle to the right of the bike. The observed firmware does not need more than that - lateral offsets beyond a lane width are not produced.
+
+**speedY sign convention.** byte [7] trends increasingly negative as a target approaches and increasingly positive as it falls behind, giving `0.5 m/s` quantised closing speed. Interpreted with this sign, `byte[7] = -7` means the target is closing at 3.5 m/s.
+
+**History: earlier rale/radarble interpretation.** An earlier version of this document (and the rale/radarble README that inspired it) decoded bytes [2..4] as a 24-bit big-endian packed field of 13-bit signed `rangeY` + 11-bit signed `rangeX`, and took bytes [7]/[8] as `speedX`/`speedY`. That interpretation produces garbage against real RearVue 820 captures: `rangeX` flips by tens of metres between adjacent frames of the same track, and `rangeY` shows 800 m discontinuities. The zone-counter decoding above was derived empirically from a 200-wrap-event bit-flip analysis across 15 k packets on 2026-04-21 and matches every observed trajectory smoothly. If you are working with a different Varia model (RTL515, RVR315, RCT715), re-verify - the zone-counter encoding has only been confirmed on the RearVue 820 so far.
 
 Reference Python and Kotlin decoders are in `python/decode_3204.py` and `kotlin/RadarV2Decoder.kt`.
 

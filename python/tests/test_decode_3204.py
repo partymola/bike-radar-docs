@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Unit tests for decode_3204.parse_target / parse_notification.
 
-Hand-packs synthetic frames covering signed bit-packing corner cases
-(rangeX/rangeY boundaries, negative speeds), multi-target notifications,
-status frames, and device-status frames. No real capture required.
+Hand-packs synthetic frames covering zone transitions, lateral offset
+signed-byte boundaries, multi-target notifications, status frames, and
+device-status frames. No real capture required.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from decode_3204 import (
     HEADER_SIZE,
     STATUS_FRAME_BIT,
     TARGET_SIZE,
+    ZONE_SIZE_M,
     Frame,
     iter_3204_lines,
     parse_notification,
@@ -23,25 +24,27 @@ from decode_3204 import (
 )
 
 
-def pack_target(tid: int, cls: int, rx_raw: int, ry_raw: int,
-                length_raw: int = 0, width_raw: int = 0,
-                sx_raw: int = 0, sy_raw: int = 0) -> bytes:
-    """Pack a 9-byte target struct from raw (pre-scaling) values.
+def pack_target(tid: int, cls: int, b2: int, zone: int,
+                rx_int8: int = 0, length_raw: int = 0, width_raw: int = 0,
+                sy_raw: int = 0, sentinel: int = 0x80) -> bytes:
+    """Pack a 9-byte target struct.
 
-    rx_raw is 11-bit signed, ry_raw is 13-bit signed, speeds are 8-bit signed.
-    length_raw / width_raw are unsigned bytes (decoder scales by 0.25).
+    `zone` (0..7) is encoded into byte[3] bits 0..2 via the inverse of the
+    decoder's ((b3 & 7) + 1) & 7 rotation: b3 bits 0..2 = (zone - 1) & 7.
+    Bits 3..7 of byte[3] are left at zero (decoder ignores them).
+    `rx_int8` is a signed 8-bit lateral offset (* 0.1 m by the decoder).
     """
-    r24 = ((ry_raw & 0x1FFF) << 11) | (rx_raw & 0x07FF)
+    b3 = (zone - 1) & 0x07
     return bytes([
         tid & 0xff,
         cls & 0xff,
-        (r24 >> 16) & 0xff,
-        (r24 >> 8) & 0xff,
-        r24 & 0xff,
+        b2 & 0xff,
+        b3 & 0xff,
+        rx_int8 & 0xff,
         length_raw & 0xff,
         width_raw & 0xff,
-        sx_raw & 0xff,
         sy_raw & 0xff,
+        sentinel & 0xff,
     ])
 
 
@@ -51,93 +54,102 @@ def pack_frame(header: int, targets: list[bytes]) -> bytes:
 
 class TestParseTarget(unittest.TestCase):
     def test_zero_target(self):
-        t = parse_target(pack_target(0, 4, 0, 0))
+        t = parse_target(pack_target(0, 4, b2=0, zone=0))
         self.assertEqual(t.target_id, 0)
         self.assertEqual(t.target_class, 4)
         self.assertEqual(t.range_x, 0.0)
         self.assertEqual(t.range_y, 0.0)
+        self.assertEqual(t.zone, 0)
         self.assertEqual(t.length, 0.0)
         self.assertEqual(t.width, 0.0)
-        self.assertEqual(t.speed_x, 0.0)
         self.assertEqual(t.speed_y, 0.0)
         self.assertEqual(t.class_name, "UNKNOWN")
 
-    def test_positive_ranges(self):
-        # rx_raw=100 -> 10.0 m lateral; ry_raw=500 -> 50.0 m longitudinal
-        t = parse_target(pack_target(7, 23, 100, 500))
-        self.assertEqual(t.target_id, 7)
-        self.assertEqual(t.class_name, "NORMAL")
-        self.assertAlmostEqual(t.range_x, 10.0)
-        self.assertAlmostEqual(t.range_y, 50.0)
+    def test_zone_0_near_field(self):
+        # b2=100, zone=0 -> 10.0 m
+        t = parse_target(pack_target(7, 23, b2=100, zone=0))
+        self.assertEqual(t.zone, 0)
+        self.assertAlmostEqual(t.range_y, 10.0)
 
-    def test_negative_rangex(self):
-        # rx_raw = -100 -> lateral -10.0 m (vehicle to the left)
-        t = parse_target(pack_target(1, 16, -100, 500))
-        self.assertAlmostEqual(t.range_x, -10.0)
-        self.assertAlmostEqual(t.range_y, 50.0)
+    def test_zone_0_top_of_range(self):
+        # b2=255, zone=0 -> 25.5 m (just inside the near zone)
+        t = parse_target(pack_target(7, 23, b2=255, zone=0))
+        self.assertAlmostEqual(t.range_y, 25.5)
 
-    def test_negative_rangey(self):
-        t = parse_target(pack_target(1, 16, 0, -200))
-        self.assertAlmostEqual(t.range_y, -20.0)
-        self.assertAlmostEqual(t.range_x, 0.0)
+    def test_zone_1_wrap(self):
+        # b2=0, zone=1 -> exactly 25.6 m (just past the near zone boundary)
+        t = parse_target(pack_target(7, 23, b2=0, zone=1))
+        self.assertEqual(t.zone, 1)
+        self.assertAlmostEqual(t.range_y, 25.6)
+
+    def test_zone_2(self):
+        # b2=100, zone=2 -> 51.2 + 10.0 = 61.2 m
+        t = parse_target(pack_target(7, 23, b2=100, zone=2))
+        self.assertEqual(t.zone, 2)
+        self.assertAlmostEqual(t.range_y, 61.2)
+
+    def test_zone_3(self):
+        # b2=200, zone=3 -> 76.8 + 20.0 = 96.8 m
+        t = parse_target(pack_target(7, 23, b2=200, zone=3))
+        self.assertEqual(t.zone, 3)
+        self.assertAlmostEqual(t.range_y, 96.8)
+
+    def test_zone_7_far_limit(self):
+        # b2=255, zone=7 -> 179.2 + 25.5 = 204.7 m (top of addressable range)
+        t = parse_target(pack_target(7, 23, b2=255, zone=7))
+        self.assertEqual(t.zone, 7)
+        self.assertAlmostEqual(t.range_y, 204.7)
+
+    def test_rangex_positive(self):
+        # rx_int8=50 -> +5.0 m (vehicle to the right)
+        t = parse_target(pack_target(1, 16, b2=100, zone=0, rx_int8=50))
+        self.assertAlmostEqual(t.range_x, 5.0)
+
+    def test_rangex_negative(self):
+        # rx_int8=-30 -> -3.0 m (vehicle to the left)
+        t = parse_target(pack_target(1, 16, b2=100, zone=0, rx_int8=-30))
+        self.assertAlmostEqual(t.range_x, -3.0)
 
     def test_rangex_max_positive(self):
-        # 11-bit signed max = 1023 -> +102.3 m
-        t = parse_target(pack_target(1, 16, 1023, 0))
-        self.assertAlmostEqual(t.range_x, 102.3)
+        # int8 max = 127 -> +12.7 m
+        t = parse_target(pack_target(1, 16, b2=0, zone=0, rx_int8=127))
+        self.assertAlmostEqual(t.range_x, 12.7)
 
     def test_rangex_min_negative(self):
-        # 11-bit signed min = -1024 -> -102.4 m
-        t = parse_target(pack_target(1, 16, -1024, 0))
-        self.assertAlmostEqual(t.range_x, -102.4)
-
-    def test_rangey_max_positive(self):
-        # 13-bit signed max = 4095 -> +409.5 m
-        t = parse_target(pack_target(1, 16, 0, 4095))
-        self.assertAlmostEqual(t.range_y, 409.5)
-
-    def test_rangey_min_negative(self):
-        # 13-bit signed min = -4096 -> -409.6 m
-        t = parse_target(pack_target(1, 16, 0, -4096))
-        self.assertAlmostEqual(t.range_y, -409.6)
-
-    def test_rangex_and_rangey_independent(self):
-        # Both fields non-zero; confirm no bleed between the 11-bit and 13-bit slots.
-        t = parse_target(pack_target(1, 16, -1024, 4095))
-        self.assertAlmostEqual(t.range_x, -102.4)
-        self.assertAlmostEqual(t.range_y, 409.5)
+        # int8 min = -128 -> -12.8 m
+        t = parse_target(pack_target(1, 16, b2=0, zone=0, rx_int8=-128))
+        self.assertAlmostEqual(t.range_x, -12.8)
 
     def test_length_width_scale(self):
         # length_raw=16 -> 4.0 m; width_raw=8 -> 2.0 m
-        t = parse_target(pack_target(1, 23, 0, 0, length_raw=16, width_raw=8))
+        t = parse_target(pack_target(1, 23, b2=0, zone=0, length_raw=16, width_raw=8))
         self.assertEqual(t.length, 4.0)
         self.assertEqual(t.width, 2.0)
 
-    def test_speed_positive(self):
-        # sx=10 -> +5.0 m/s; sy=20 -> +10.0 m/s
-        t = parse_target(pack_target(1, 23, 0, 0, sx_raw=10, sy_raw=20))
-        self.assertEqual(t.speed_x, 5.0)
-        self.assertEqual(t.speed_y, 10.0)
+    def test_speed_approaching(self):
+        # sy_raw=-10 -> -5.0 m/s (approaching at 5 m/s)
+        t = parse_target(pack_target(1, 23, b2=0, zone=0, sy_raw=-10))
+        self.assertEqual(t.speed_y, -5.0)
 
-    def test_speed_negative(self):
-        # sx=-10 (two's complement) -> -5.0; sy=-20 -> -10.0
-        t = parse_target(pack_target(1, 23, 0, 0, sx_raw=-10, sy_raw=-20))
-        self.assertEqual(t.speed_x, -5.0)
-        self.assertEqual(t.speed_y, -10.0)
+    def test_speed_receding(self):
+        # sy_raw=+10 -> +5.0 m/s (falling behind)
+        t = parse_target(pack_target(1, 23, b2=0, zone=0, sy_raw=10))
+        self.assertEqual(t.speed_y, 5.0)
 
     def test_speed_min_max(self):
         # int8 range: -128..127 -> -64.0..+63.5 m/s
-        t = parse_target(pack_target(1, 23, 0, 0, sx_raw=127, sy_raw=-128))
-        self.assertEqual(t.speed_x, 63.5)
+        t = parse_target(pack_target(1, 23, b2=0, zone=0, sy_raw=127))
+        self.assertEqual(t.speed_y, 63.5)
+        t = parse_target(pack_target(1, 23, b2=0, zone=0, sy_raw=-128))
         self.assertEqual(t.speed_y, -64.0)
 
     def test_class_name_lookup(self):
         for code, name in CLASS_NAMES.items():
-            t = parse_target(pack_target(0, code, 0, 0))
+            t = parse_target(pack_target(0, code, b2=0, zone=0))
             self.assertEqual(t.class_name, name)
 
     def test_class_name_unknown(self):
-        t = parse_target(pack_target(0, 99, 0, 0))
+        t = parse_target(pack_target(0, 99, b2=0, zone=0))
         self.assertEqual(t.class_name, "UNKNOWN(99)")
 
     def test_wrong_length_rejected(self):
@@ -149,21 +161,22 @@ class TestParseTarget(unittest.TestCase):
 
 class TestParseNotification(unittest.TestCase):
     def test_single_target(self):
-        payload = pack_frame(0x0000, [pack_target(5, 23, 50, 300, sx_raw=2, sy_raw=20)])
+        payload = pack_frame(0x0000, [pack_target(5, 23, b2=200, zone=1, rx_int8=15, sy_raw=-10)])
         frame = parse_notification(payload)
         self.assertFalse(frame.is_status_frame)
         self.assertFalse(frame.is_device_status)
         self.assertEqual(len(frame.targets), 1)
         t = frame.targets[0]
         self.assertEqual(t.target_id, 5)
-        self.assertAlmostEqual(t.range_x, 5.0)
-        self.assertAlmostEqual(t.range_y, 30.0)
-        self.assertEqual(t.speed_y, 10.0)
+        self.assertAlmostEqual(t.range_x, 1.5)
+        # zone=1, b2=200 -> 25.6 + 20.0 = 45.6 m
+        self.assertAlmostEqual(t.range_y, 45.6)
+        self.assertEqual(t.speed_y, -5.0)
 
     def test_multi_target(self):
-        t1 = pack_target(1, 23, -50, 400)
-        t2 = pack_target(2, 36, 0, 100)
-        t3 = pack_target(3, 13, 20, 200)
+        t1 = pack_target(1, 23, b2=100, zone=0, rx_int8=-15)   # 10.0 m, -1.5 m
+        t2 = pack_target(2, 36, b2=0, zone=2, rx_int8=0)        # 51.2 m
+        t3 = pack_target(3, 13, b2=50, zone=1, rx_int8=20)      # 30.6 m, +2.0 m
         frame = parse_notification(pack_frame(0x0000, [t1, t2, t3]))
         self.assertEqual(len(frame.targets), 3)
         ids = [t.target_id for t in frame.targets]
@@ -171,11 +184,12 @@ class TestParseNotification(unittest.TestCase):
         self.assertEqual(frame.targets[0].class_name, "NORMAL")
         self.assertEqual(frame.targets[1].class_name, "HIGH")
         self.assertEqual(frame.targets[2].class_name, "LOW_STABLE")
-        self.assertAlmostEqual(frame.targets[0].range_x, -5.0)
-        self.assertAlmostEqual(frame.targets[0].range_y, 40.0)
+        self.assertAlmostEqual(frame.targets[0].range_x, -1.5)
+        self.assertAlmostEqual(frame.targets[0].range_y, 10.0)
+        self.assertAlmostEqual(frame.targets[1].range_y, 51.2)
+        self.assertAlmostEqual(frame.targets[2].range_y, 30.6)
 
     def test_status_frame_skipped(self):
-        # bit 0 set -> decoder should NOT attempt to parse the body as targets
         garbage = b"\xff" * 9
         payload = pack_frame(STATUS_FRAME_BIT, [garbage])
         frame = parse_notification(payload)
@@ -183,14 +197,12 @@ class TestParseNotification(unittest.TestCase):
         self.assertEqual(frame.targets, [])
 
     def test_device_status_frame(self):
-        # bit 2 set -> flagged but no targets parsed
         payload = pack_frame(DEVICE_STATUS_BIT, [b"\x01\x02\x03\x04"])
         frame = parse_notification(payload)
         self.assertTrue(frame.is_device_status)
         self.assertEqual(frame.targets, [])
 
     def test_empty_body(self):
-        # Header only, no targets — legal (e.g. no vehicles in view)
         frame = parse_notification(pack_frame(0x0000, []))
         self.assertEqual(frame.targets, [])
         self.assertFalse(frame.is_status_frame)
@@ -198,7 +210,7 @@ class TestParseNotification(unittest.TestCase):
 
     def test_body_with_trailing_bytes(self):
         # 1 target + 3 trailing bytes -> trailing bytes ignored, one target returned
-        payload = pack_frame(0x0000, [pack_target(1, 23, 10, 100)]) + b"\xaa\xbb\xcc"
+        payload = pack_frame(0x0000, [pack_target(1, 23, b2=100, zone=0)]) + b"\xaa\xbb\xcc"
         frame = parse_notification(payload)
         self.assertEqual(len(frame.targets), 1)
 
@@ -219,10 +231,10 @@ class TestCaptureLineIteration(unittest.TestCase):
         lines = [
             "# comment line",
             "",
-            "1700000000000 3203 02",           # legacy heartbeat
-            "1700000000100 3204 0000",          # empty 3204 frame
-            "1700000000200 3204 0000" + pack_target(1, 23, 10, 100).hex(),
-            "1700000000300 2a19 5a",            # unrelated char (battery)
+            "1700000000000 3203 02",
+            "1700000000100 3204 0000",
+            "1700000000200 3204 0000" + pack_target(1, 23, b2=100, zone=0).hex(),
+            "1700000000300 2a19 5a",
             "malformed line",
             "1700000000400 3204 notahexstring",
         ]
@@ -234,7 +246,7 @@ class TestCaptureLineIteration(unittest.TestCase):
         self.assertEqual(out[1][0], 1700000000200)
 
     def test_roundtrip_through_file_iterator(self):
-        target_bytes = pack_target(9, 36, -512, 1500, sx_raw=-4, sy_raw=40)
+        target_bytes = pack_target(9, 36, b2=50, zone=3, rx_int8=-40, sy_raw=-20)
         hex_payload = (pack_frame(0x0000, [target_bytes])).hex()
         line = f"1700000005000 3204 {hex_payload}\n"
         fp = io.StringIO(line)
@@ -246,10 +258,10 @@ class TestCaptureLineIteration(unittest.TestCase):
         t = frame.targets[0]
         self.assertEqual(t.target_id, 9)
         self.assertEqual(t.class_name, "HIGH")
-        self.assertAlmostEqual(t.range_x, -51.2)
-        self.assertAlmostEqual(t.range_y, 150.0)
-        self.assertEqual(t.speed_x, -2.0)
-        self.assertEqual(t.speed_y, 20.0)
+        self.assertAlmostEqual(t.range_x, -4.0)
+        # zone=3, b2=50 -> 76.8 + 5.0 = 81.8 m
+        self.assertAlmostEqual(t.range_y, 81.8)
+        self.assertEqual(t.speed_y, -10.0)
 
 
 if __name__ == "__main__":
