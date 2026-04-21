@@ -23,7 +23,8 @@ replaced with `AA:BB:CC:DD:EE:FF`.
 | File | What | Notes |
 |------|------|-------|
 | `3203-sample.log` | ~900 notifications from a short RearVue 820 session | Mostly V1 heartbeats with a handful of threat packets. Good for exercising `python/decode_3203.py` and `kotlin/RadarV1Decoder.kt`. |
-| `3204-sample.log` | ~2.6k lines from a second RearVue 820 session after the V2 unlock | ~1,200 V2 target frames on `3204` interleaved with V1 heartbeats on `3203`. Runs `python/decode_3204.py` and `kotlin/RadarV2Decoder.kt`. |
+| `3204-sample.log` | ~2.6k lines from a second RearVue 820 session after the V2 unlock | Unlock handshake + heartbeat-only idle period; no actual target frames. Useful for exercising the header-parse paths but does not exercise the range decoding. |
+| `3204-overtake-sample.log` | 2-minute window from a RearVue 820 session with real vehicle traffic | 1,151 V2 target frames with ~1,500 target rows. Contains a textbook boundary-crossing case around 20:07:27 (tid=96 enters at zone 1 real ~31.7m, crosses the 25.6m boundary, approaches to ~12m). Best file for validating a V2 decoder end to end. |
 
 Both captures come from post-bond sessions. Reproducing the V2 unlock
 from scratch needs the LESC bond + Battery Service pre-handshake
