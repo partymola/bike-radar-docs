@@ -15,8 +15,16 @@ format" for the full spec. Comments start with `#`; data lines look like:
 - `char_tail_4hex`: last 4 hex digits of the characteristic UUID (e.g. `3203`).
 - `hex_bytes_no_spaces`: raw notification payload.
 
-Captures have been scrubbed — any BLE MAC addresses in comment lines are
-replaced with `AA:BB:CC:DD:EE:FF`.
+Captures have been scrubbed and normalised:
+
+- BLE MAC addresses in comment lines are replaced with `AA:BB:CC:DD:EE:FF`.
+- Data-line timestamps are rebased so the first data line is at `0`.
+  Inter-frame deltas are preserved exactly, which is all the wire format
+  and the reference decoders care about — absolute wall-clock values add
+  no information to a reproducible test fixture.
+
+Run `tools/normalize_sample.py <file> --in-place` to re-apply the
+timestamp rebase to a fresh capture before checking it in.
 
 ## What is here
 
@@ -24,7 +32,7 @@ replaced with `AA:BB:CC:DD:EE:FF`.
 |------|------|-------|
 | `3203-sample.log` | ~900 notifications from a short RearVue 820 session | Mostly V1 heartbeats with a handful of threat packets. Good for exercising `python/decode_3203.py` and `kotlin/RadarV1Decoder.kt`. |
 | `3204-sample.log` | ~2.6k lines from a second RearVue 820 session after the V2 unlock | Unlock handshake + heartbeat-only idle period; no actual target frames. Useful for exercising the header-parse paths but does not exercise the range decoding. |
-| `3204-overtake-sample.log` | 2-minute window from a RearVue 820 session with real vehicle traffic | 1,151 V2 target frames with ~1,500 target rows. Contains a textbook boundary-crossing case around 20:07:27 (tid=96 enters at zone 1 real ~31.7m, crosses the 25.6m boundary, approaches to ~12m). Best file for validating a V2 decoder end to end. |
+| `3204-overtake-sample.log` | 2-minute window from a RearVue 820 session with real vehicle traffic | 1,151 V2 target frames with ~1,500 target rows. Contains a textbook overtake case around t~=86 s (tid=96 approaches from ~31 m behind to ~12 m). Best file for validating a V2 decoder end to end. The overtake's smoothness (frame-to-frame Δ\|rangeY\| ≤ 2 m) is a good sanity check for the 24-bit packed range decoder; older revisions that placed bytes [3] bits 0..2 as a separate "zone counter" produce 25 m boundary jumps on this very track and should be rejected. |
 
 Both captures come from post-bond sessions. Reproducing the V2 unlock
 from scratch needs the LESC bond + Battery Service pre-handshake

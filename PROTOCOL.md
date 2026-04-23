@@ -139,31 +139,50 @@ A payload of exactly 2 bytes with no target body is a "heartbeat" and is emitted
 | Offset | Field | Decode |
 |--------|-------|--------|
 | 0 | `targetId` | uint8 radar-assigned track id |
-| 1 | `targetClass` | enum: `HIGH=36`, `NORMAL=23`, `NORMAL_STABLE=26`, `LOW=16`, `LOW_STABLE=13`, `UNKNOWN=4` |
-| 2 | `rangeYLow` | uint8, distance within current 25.6 m zone, * 0.1 m |
-| 3 | bits 0..2: `rangeYZone`; bits 3..7: reserved (see below) |
-| 4 | `rangeX` | int8, lateral offset * 0.1 m (+ve = right) |
-| 5 | `lengthMeters` | uint8, multiply by 0.25 for metres |
-| 6 | `widthMeters` | uint8, multiply by 0.25 for metres |
-| 7 | `speedY` | int8, multiply by 0.5 for m/s (longitudinal, negative = approaching) |
-| 8 | reserved | observed constant `0x80` across all samples |
+| 1 | `targetClass` | enum (observed values, project-native names): `STRONG=36`, `MEDIUM=23`, `MEDIUM_HOLD=26`, `WEAK=16`, `WEAK_HOLD=13`, `UNCLASSIFIED=4`. Higher numeric value = larger / more confident return signature. |
+| 2..4 | `rangeY` + `rangeX` | 24-bit little-endian packed; see decoding below |
+| 5 | `lengthMeters` | uint8, multiply by 0.25 for metres (class-template, not a measurement) |
+| 6 | `widthMeters` | uint8, multiply by 0.25 for metres (class-template, not a measurement) |
+| 7 | `speedY` | int8, multiply by 0.5 for m/s (longitudinal closing speed) |
+| 8 | `speedX` | int8, multiply by 0.5 for m/s (lateral). The constant `0x80` (-128 → -64 m/s) is the firmware's "no lateral velocity available" sentinel; treat values at the sentinel as unknown. |
 
-**Decoding `rangeY`.** The full longitudinal distance is spread across bytes [2] and the low 3 bits of byte [3]:
+**Decoding `rangeY` and `rangeX`.** Bytes [2..4] form a 24-bit little-endian word that packs two signed fields:
+
+- **bits 0..10** = `rangeXBits`, an 11-bit two's-complement signed value.
+- **bits 11..23** = `rangeYBits`, a 13-bit two's-complement signed value.
+
+After sign-extension, multiply each by 0.1 m. Pseudocode:
 
 ```
-zone       = ((byte[3] & 0x07) + 1) & 0x07       # 0..7
-rangeY_m   = zone * 25.6 + byte[2] * 0.1
+packed     = byte[2] | (byte[3] << 8) | (byte[4] << 16)        # little-endian 24-bit
+rangeXBits = packed & 0x07FF                                    # 11-bit
+if rangeXBits & 0x0400: rangeXBits -= 0x0800                    # sign-extend (11-bit)
+rangeYBits = (packed >> 11) & 0x1FFF                            # 13-bit
+if rangeYBits & 0x1000: rangeYBits -= 0x2000                    # sign-extend (13-bit)
+rangeX_m   = rangeXBits * 0.1                                   # ±204.7 m theoretical
+rangeY_m   = rangeYBits * 0.1                                   # ±409.5 m theoretical, ~220 m in practice
 ```
 
-byte [2] is a plain uint8 × 0.1 m (0..25.5 m) reporting the distance within the current 25.6 m zone. byte [3] bits 0..2 carry a 3-bit counter that advances by 1 every time the target crosses a 25.6 m boundary: the encoding rotates 7 → 0 → 1 → 2 → … so that zone = 0 (0..25.5 m) reads as `0b111`, zone = 1 (25.6..51.1 m) as `0b000`, zone = 2 (51.2..76.7 m) as `0b001`, and so on up to zone = 7 (179.2..204.7 m). The expression `((b3 & 7) + 1) & 7` inverts that rotation back to the zone index. Eight zones × 25.6 m covers 204.8 m, comfortably within the RearVue 820's 175 m detection range.
+**Sign convention for `rangeY` (rear-radar coordinate system).**
+- `rangeY > 0` → target is BEHIND the rider. This is the dominant case (~99% of frames in commute captures).
+- `rangeY < 0` → target is AHEAD of the rider, i.e. has just overtaken. Rare (~0.7% of frames). The radar's beam is rear-facing so coverage of "ahead" is incidental and usually short-lived.
 
-Bytes 3 bits 3..7 change per packet but do not correlate with target position, size, or age in the captures analysed so far. Treat as reserved / do not decode.
+`rangeX > 0` is to the rider's right.
 
-**Decoding `rangeX`.** byte [4] is a standalone int8 × 0.1 m, range -12.8..+12.7 m. Positive = vehicle to the right of the bike. The observed firmware does not need more than that - lateral offsets beyond a lane width are not produced.
+**speedY sign convention.** byte [7] trends increasingly negative as a target approaches and increasingly positive as it falls behind, giving `0.5 m/s` quantised closing speed. Interpreted with this sign, `byte[7] = -7` means the target is closing at 3.5 m/s. byte [7] is the official approach-speed signal; deriving speed from frame-to-frame `rangeY` deltas is unnecessary and produces ~2.7 m/s RMS jitter against this baseline.
 
-**speedY sign convention.** byte [7] trends increasingly negative as a target approaches and increasingly positive as it falls behind, giving `0.5 m/s` quantised closing speed. Interpreted with this sign, `byte[7] = -7` means the target is closing at 3.5 m/s.
+**Validation against V1 ground truth.** Decoding 22,804 V2 target frames across three independent commute captures with the formula above produces:
 
-**History: earlier rale/radarble interpretation.** An earlier version of this document (and the rale/radarble README that inspired it) decoded bytes [2..4] as a 24-bit big-endian packed field of 13-bit signed `rangeY` + 11-bit signed `rangeX`, and took bytes [7]/[8] as `speedX`/`speedY`. That interpretation produces garbage against real RearVue 820 captures: `rangeX` flips by tens of metres between adjacent frames of the same track, and `rangeY` shows 800 m discontinuities. The zone-counter decoding above was derived empirically from a 200-wrap-event bit-flip analysis across 15 k packets on 2026-04-21 and matches every observed trajectory smoothly. If you are working with a different Varia model (RTL515, RVR315, RCT715), re-verify - the zone-counter encoding has only been confirmed on the RearVue 820 so far.
+- Median `|rangeY|` = 30 m, max 220 m. Matches V1's `(median 29 m, max 211 m)` distance distribution within statistical noise.
+- Frame-to-frame median `Δ|rangeY|` = 0.20 m, p98 = 1.70 m. V1 baseline is p98 ≤ 2 m. Trajectories are smooth.
+- 96% of long+far track segments (≥3 s, ≥10 frames, max distance ≥30 m) satisfy V1's smoothness criterion.
+- The known reference case "tid 42 = sustained 5-10 m tailgater" decodes as 9.8-51.1 m behind across 246 observations (i.e. the close end matches the user's eyeball estimate; the spread reflects multiple cars sharing the same tid over several minutes, a well-known firmware behaviour).
+
+Bytes [3] bits 3..7 are NOT a separate field; they are the upper 5 bits of the packed 24-bit word and decode as part of `rangeY`. Treating them as a "reserved chirp counter" was an early hypothesis that this document's previous revision propagated incorrectly.
+
+**History: prior incorrect decodings.** An earlier revision of this document described `byte[2..4]` as `rangeYLow + rangeYZone (3-bit) + rangeX (separate int8)`, with `rangeY = zone * 25.6 + byte[2] * 0.1`. That zone-counter interpretation places close tailgaters at ~25-30 m forward (the audit's flagship failure case) and produces phantom 200 m "ghost" frames. It is wrong, retracted as of this revision. The rale/radarble project has the right idea (24-bit packed, two signed fields) but uses big-endian byte order; the actual encoding is little-endian as documented above.
+
+**Provenance.** This documentation describes the on-the-wire format of `6a4e3204` notifications observed from a personally-owned RearVue 820. The encoding above was determined through interoperability analysis after black-box reverse engineering of 22 k captured frames over five days produced eight successive incorrect hypotheses (zone-counter, signed int8, signed zone-counter, offset model, multi-frame state machine, byte-pair combinatorics, etc., all documented as dated notebooks in the consuming Android project). The text here is a clean-room re-statement of the byte layout in the project's own variable names; no source code from any other implementation is reproduced.
 
 Reference Python and Kotlin decoders are in `python/decode_3204.py` and `kotlin/RadarV2Decoder.kt`.
 

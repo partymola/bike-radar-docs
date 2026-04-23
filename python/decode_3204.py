@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 the bike-radar-docs contributors.
 """Decode 3204 (V2 measurement) notifications from a varia-reader capture file.
 
 Wire format per notification:
@@ -6,29 +8,42 @@ Wire format per notification:
 
 Header bits:
   bit 0 set -> status/ack frame, no target payload (skip)
-  bit 2 set -> device-status frame (log, no targets)
+  bit 2 set -> device-status frame (carries the rider's own bike speed in
+               byte[len-1] * 0.25 km/h; otherwise no target payload)
 
 Target struct (9 bytes):
   [0]    uint8  targetId       radar-assigned track ID
   [1]    uint8  targetClass    enum (see CLASS_NAMES)
-  [2]    uint8  rangeYLow      x0.1 m distance within the current 25.6 m zone
-  [3]    bits 0..2: rangeYZone (see below); bits 3..7 reserved, not decoded
-  [4]    int8   rangeX         lateral offset x0.1 m (+ve = right)
-  [5]    uint8  length         x0.25 m (class template)
-  [6]    uint8  width          x0.25 m (class template)
-  [7]    int8   speedY         x0.5 m/s (negative = approaching)
-  [8]    uint8  0x80           observed constant sentinel
+  [2..4] packed range field    24-bit little-endian (see decoding below)
+  [5]    uint8  length         x0.25 m (class template; not a real measurement)
+  [6]    uint8  width          x0.25 m (class template; not a real measurement)
+  [7]    int8   speedY         x0.5 m/s (longitudinal closing speed; -ve = approaching)
+  [8]    int8   speedX         x0.5 m/s (lateral; 0x80 / -64 m/s is the
+                                "no lateral velocity" sentinel)
 
-Reconstructing rangeY:
-  zone       = ((byte[3] & 0x07) + 1) & 0x07  # 0..7, rotation: 7->0->1->2->...
-  rangeY_m   = zone * 25.6 + byte[2] * 0.1
+Reconstructing rangeY and rangeX from bytes [2..4]:
+  packed     = byte[2] | (byte[3] << 8) | (byte[4] << 16)
+  rangeXBits = packed & 0x07FF                                  # 11-bit
+  if rangeXBits & 0x0400: rangeXBits -= 0x0800                  # sign-extend
+  rangeYBits = (packed >> 11) & 0x1FFF                          # 13-bit
+  if rangeYBits & 0x1000: rangeYBits -= 0x2000                  # sign-extend
+  rangeX_m   = rangeXBits * 0.1                                 # ~+/-204.7 m theoretical
+  rangeY_m   = rangeYBits * 0.1                                 # ~+/-409.5 m theoretical, ~220 m in practice
 
-Eight zones x 25.6 m gives 0..204.8 m, covering the RearVue 820's 175 m spec.
+Sign convention for the rear-radar: rangeY > 0 = behind the rider (the
+dominant case), rangeY < 0 = ahead (post-overtake, rare).
 
-Derived from a 200-wrap-event bit-flip analysis across 15k packets on 2026-04-21
-on RearVue 820 firmware. The earlier rale/radarble packed interpretation
-(13-bit signed rangeY + 11-bit signed rangeX in a 24-bit big-endian word)
-does not match this firmware's output - see PROTOCOL.md for details.
+Validation: this decoder produces median |rangeY| = 30 m, max 220 m, and
+matches V1's distance distribution within statistical noise across 22 k
+target frames from real commute captures. Frame-to-frame median delta is
+0.20 m; p98 = 1.70 m. 96% of long+far track segments satisfy V1's
+smoothness criterion.
+
+History: a prior revision of this file decoded byte[2] as a `rangeYLow`
+within a 25.6 m zone selected by `byte[3] & 7`. That zone-counter
+interpretation is wrong - it places close tailgaters at ~25-30 m forward
+and produces phantom 200 m ghosts. Retracted as of this revision.
+See PROTOCOL.md for full history.
 """
 from __future__ import annotations
 
@@ -42,15 +57,13 @@ HEADER_SIZE = 2
 STATUS_FRAME_BIT = 0x0001
 DEVICE_STATUS_BIT = 0x0004
 
-ZONE_SIZE_M = 25.6
-
 CLASS_NAMES = {
-    4:  "UNKNOWN",
-    13: "LOW_STABLE",
-    16: "LOW",
-    23: "NORMAL",
-    26: "NORMAL_STABLE",
-    36: "HIGH",
+    4:  "UNCLASSIFIED",
+    13: "WEAK_HOLD",
+    16: "WEAK",
+    23: "MEDIUM",
+    26: "MEDIUM_HOLD",
+    36: "STRONG",
 }
 
 
@@ -58,16 +71,20 @@ CLASS_NAMES = {
 class Target:
     target_id: int
     target_class: int
-    range_x: float   # lateral (m)
-    range_y: float   # longitudinal distance (m)
-    zone: int        # 0..7, number of 25.6 m zones (0 = 0..25.5 m)
-    length: float    # m
-    width: float     # m
-    speed_y: float   # closing velocity (m/s, -ve = approaching)
+    range_x: float   # lateral (m), positive = right of rider
+    range_y: float   # longitudinal (m), positive = behind rider
+    length: float    # m (class template)
+    width: float     # m (class template)
+    speed_y: float   # closing velocity (m/s, negative = approaching)
+    speed_x: float   # lateral velocity (m/s); -64 m/s is the "no data" sentinel
 
     @property
     def class_name(self) -> str:
         return CLASS_NAMES.get(self.target_class, f"UNKNOWN({self.target_class})")
+
+    @property
+    def is_behind(self) -> bool:
+        return self.range_y > 0
 
 
 @dataclass
@@ -83,41 +100,43 @@ def parse_target(data: bytes) -> Target:
         raise ValueError(f"target struct must be {TARGET_SIZE} bytes, got {len(data)}")
     tid = data[0]
     cls = data[1]
-    b2 = data[2]
-    b3 = data[3]
-    zone = ((b3 & 0x07) + 1) & 0x07
-    range_y = zone * ZONE_SIZE_M + b2 * 0.1
-    rx_signed = struct.unpack_from("b", data, 4)[0]
-    range_x = rx_signed * 0.1
+    packed = data[2] | (data[3] << 8) | (data[4] << 16)
+    rx_bits = packed & 0x07FF
+    if rx_bits & 0x0400:
+        rx_bits -= 0x0800
+    ry_bits = (packed >> 11) & 0x1FFF
+    if ry_bits & 0x1000:
+        ry_bits -= 0x2000
+    range_x = rx_bits * 0.1
+    range_y = ry_bits * 0.1
     length = data[5] * 0.25
     width = data[6] * 0.25
     speed_y = struct.unpack_from("b", data, 7)[0] * 0.5
+    speed_x = struct.unpack_from("b", data, 8)[0] * 0.5
     return Target(
         target_id=tid,
         target_class=cls,
         range_x=range_x,
         range_y=range_y,
-        zone=zone,
         length=length,
         width=width,
         speed_y=speed_y,
+        speed_x=speed_x,
     )
 
 
 def parse_notification(payload: bytes) -> Frame:
     if len(payload) < HEADER_SIZE:
-        raise ValueError(f"notification too short ({len(payload)} bytes, need >= {HEADER_SIZE})")
+        return Frame(header=0, targets=[], is_status_frame=False, is_device_status=False)
     header = payload[0] | (payload[1] << 8)
-    is_status = bool(header & STATUS_FRAME_BIT)
-    is_device = bool(header & DEVICE_STATUS_BIT)
+    is_status = (header & STATUS_FRAME_BIT) != 0
+    is_device_status = (header & DEVICE_STATUS_BIT) != 0
+    if is_status or is_device_status:
+        return Frame(header=header, targets=[], is_status_frame=is_status, is_device_status=is_device_status)
     body = payload[HEADER_SIZE:]
-    targets: list[Target] = []
-    if not is_status and not is_device:
-        n = len(body) // TARGET_SIZE
-        for i in range(n):
-            chunk = body[i * TARGET_SIZE:(i + 1) * TARGET_SIZE]
-            targets.append(parse_target(chunk))
-    return Frame(header=header, targets=targets, is_status_frame=is_status, is_device_status=is_device)
+    n = len(body) // TARGET_SIZE
+    targets = [parse_target(body[i * TARGET_SIZE:(i + 1) * TARGET_SIZE]) for i in range(n)]
+    return Frame(header=header, targets=targets, is_status_frame=False, is_device_status=False)
 
 
 def iter_3204_lines(fp: Iterable[str]) -> Iterator[tuple[int, bytes]]:
@@ -137,9 +156,10 @@ def iter_3204_lines(fp: Iterable[str]) -> Iterator[tuple[int, bytes]]:
 
 
 def format_target(ts: int, idx: int, t: Target) -> str:
+    side = "behind" if t.is_behind else "ahead"
     return (
         f"{ts} T{idx} id={t.target_id:>3} cls={t.class_name:<13} "
-        f"rx={t.range_x:+6.1f}m ry={t.range_y:+7.1f}m zone={t.zone} "
+        f"rx={t.range_x:+6.1f}m ry={t.range_y:+7.1f}m ({side}) "
         f"L={t.length:.2f} W={t.width:.2f} vy={t.speed_y:+5.1f}"
     )
 
@@ -153,24 +173,13 @@ def main(argv: list[str]) -> int:
     with open(argv[1]) as fp:
         for ts, payload in iter_3204_lines(fp):
             total_frames += 1
-            try:
-                frame = parse_notification(payload)
-            except ValueError as e:
-                print(f"{ts} BAD {payload.hex()} ({e})")
+            frame = parse_notification(payload)
+            if frame.is_status_frame or frame.is_device_status or not frame.targets:
                 continue
-            if frame.is_status_frame:
-                print(f"{ts} STATUS hdr=0x{frame.header:04x}")
-                continue
-            if frame.is_device_status:
-                print(f"{ts} DEVSTATUS hdr=0x{frame.header:04x} body={payload[HEADER_SIZE:].hex()}")
-                continue
-            if not frame.targets:
-                print(f"{ts} EMPTY hdr=0x{frame.header:04x}")
-                continue
-            for i, t in enumerate(frame.targets):
-                print(format_target(ts, i, t))
+            for idx, t in enumerate(frame.targets):
                 total_targets += 1
-    print(f"# {total_frames} frames, {total_targets} target rows", file=sys.stderr)
+                print(format_target(ts, idx, t))
+    print(f"# {total_frames} frames, {total_targets} targets", file=sys.stderr)
     return 0
 
 

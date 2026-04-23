@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 the bike-radar-docs contributors.
 package es.jjrh.bikeradar
 
 enum class VehicleSize { BIKE, CAR, TRUCK }

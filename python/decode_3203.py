@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 the bike-radar-docs contributors.
 """V1 stream (characteristic 0x3203) decoder.
 
 Reads BLE capture files in the line-based format documented in
