@@ -182,7 +182,7 @@ Bytes [3] bits 3..7 are NOT a separate field; they are the upper 5 bits of the p
 
 **History: prior incorrect decodings.** An earlier revision of this document described `byte[2..4]` as `rangeYLow + rangeYZone (3-bit) + rangeX (separate int8)`, with `rangeY = zone * 25.6 + byte[2] * 0.1`. That zone-counter interpretation places close tailgaters at ~25-30 m forward (the audit's flagship failure case) and produces phantom 200 m "ghost" frames. It is wrong, retracted as of this revision. The rale/radarble project has the right idea (24-bit packed, two signed fields) but uses big-endian byte order; the actual encoding is little-endian as documented above.
 
-**Provenance.** This documentation describes the on-the-wire format of `6a4e3204` notifications observed from a personally-owned RearVue 820. The encoding above was determined through interoperability analysis after black-box reverse engineering of 22 k captured frames over five days produced eight successive incorrect hypotheses (zone-counter, signed int8, signed zone-counter, offset model, multi-frame state machine, byte-pair combinatorics, etc., all documented as dated notebooks in the consuming Android project). The text here is a clean-room re-statement of the byte layout in the project's own variable names; no source code from any other implementation is reproduced.
+This documentation describes the on-the-wire format of `6a4e3204` notifications observed from a RearVue 820 owned by the author. The byte layout given above is stated in this project's own variable names and is cross-checked against live captures; the pseudocode in this section is original to this project.
 
 Reference Python and Kotlin decoders are in `python/decode_3204.py` and `kotlin/RadarV2Decoder.kt`.
 

@@ -13,16 +13,14 @@
 # tools/normalize_sample.py); inter-frame deltas are preserved exactly.
 #
 # Notable events in this window (times are `ms_since_start`):
-#   ~t=54 s: cluster of vehicle tracks appear behind the bike
-#   ~t=86 s: tid=96 enters reporting range at zone=1 (real ~31.7m),
-#            crosses the 25.6m boundary (b2 wraps to high values, zone
-#            rotates to 0), then approaches smoothly to ~12m before
-#            receding.
-#   ~t=93 s: tid=103 next overtake, shorter track.
+#   ~t=54 s: cluster of vehicle tracks appears behind the bike.
+#   ~t=86 s: tid=96 enters the reporting range at ~32 m behind the
+#            rider, approaches smoothly to ~12 m, then recedes.
+#   ~t=93 s: tid=103, a shorter track.
 #
-# The 25.6m zone boundary is a great exercise for a decoder under test -
-# naive implementations that treat byte[2] as a standalone uint8 * 0.1m
-# see these as phantom 25m jumps and typically quarantine the track.
+# Smoothness (frame-to-frame Δ|rangeY| ≤ 2 m across the tid=96 approach)
+# is a good sanity check for the 24-bit packed range decoder documented
+# in PROTOCOL.md.
 0 3204 02389c17f50f0310070080b5243b48093c09fd80
 89 3204 02489c17f40f0310070080b5243950093c09fe80
 267 3204 02589c17f4170310070080b5243450093c09fe80

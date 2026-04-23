@@ -39,11 +39,10 @@ target frames from real commute captures. Frame-to-frame median delta is
 0.20 m; p98 = 1.70 m. 96% of long+far track segments satisfy V1's
 smoothness criterion.
 
-History: a prior revision of this file decoded byte[2] as a `rangeYLow`
-within a 25.6 m zone selected by `byte[3] & 7`. That zone-counter
-interpretation is wrong - it places close tailgaters at ~25-30 m forward
-and produces phantom 200 m ghosts. Retracted as of this revision.
-See PROTOCOL.md for full history.
+An earlier revision of this file documented a different byte[2..4]
+decoding (rangeYLow plus a 3-bit zone selector); that interpretation
+does not fit long-range captures and has been retracted. See
+PROTOCOL.md for the byte layout and validation history.
 """
 from __future__ import annotations
 

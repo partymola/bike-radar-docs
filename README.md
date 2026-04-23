@@ -1,6 +1,6 @@
 # bike-radar-docs
 
-Reverse-engineered protocol notes and reference decoders for Garmin Varia radar devices over BLE.
+Protocol notes and reference decoders for Garmin Varia radar devices over BLE, written for interoperability with third-party clients.
 
 This repo is a knowledge drop, not a finished product. It documents what the wire looks like and gives minimal, standalone decoders that anyone can run against a captured log. A more complete Android client exists and will be released here in stages.
 
