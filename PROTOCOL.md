@@ -129,7 +129,7 @@ Little-endian uint16.
 | Bit | Meaning |
 |-----|---------|
 | 0 (`0x0001`) | Status / ack frame: no targets follow, skip the body. |
-| 2 (`0x0004`) | Device-status frame: no targets follow, log and skip. |
+| 2 (`0x0004`) | Device-status frame: no targets follow. Body carries device telemetry; see "Device-status body" below. |
 | other bits | When none of the above are set, body contains N targets. |
 
 A payload of exactly 2 bytes with no target body is a "heartbeat" and is emitted whenever the device has no targets to report. Indoor captures consist almost entirely of these.
@@ -185,6 +185,28 @@ Bytes [3] bits 3..7 are NOT a separate field; they are the upper 5 bits of the p
 This documentation describes the on-the-wire format of `6a4e3204` notifications observed from a RearVue 820 owned by the author. The byte layout given above is stated in this project's own variable names and is cross-checked against live captures; the pseudocode in this section is original to this project.
 
 Reference Python and Kotlin decoders are in `python/decode_3204.py` and `kotlin/RadarV2Decoder.kt`.
+
+### Device-status body (header bit `0x0004`)
+
+When the header has bit 2 set, the body is a 3- or 4-byte payload. The on-the-wire shape observed from a RearVue 820 is:
+
+| Total payload | Shape |
+|---------------|-------|
+| 5 bytes | header(2) + 3-byte body — sparse frames |
+| 6 bytes | header(2) + 4-byte body — full status frames, dominant during active riding |
+
+For 6-byte payloads, the last byte (`payload[5]` zero-indexed) carries the rider's own bike speed:
+
+```
+bikeSpeed_ms  = payload[5] * 0.25      # m/s, scaled by 0.25 m/s per LSB
+bikeSpeed_kmh = bikeSpeed_ms * 3.6     # equivalently, * 0.9 km/h per LSB
+```
+
+Stationary floor: raw 2 (~0.5 m/s, 1.8 km/h) — doppler noise floor above true zero; raw 0 not observed.
+
+Firmware ceiling: raw 50 (~12.5 m/s, 45 km/h); no values above 50 observed.
+
+5-byte sparse frames carry the sub-header bytes without the trailing speed byte. Decoders should leave their cached bike-speed unchanged on a sparse frame.
 
 ## Unlocking V2: pairing and pre-handshake dance
 
