@@ -204,7 +204,7 @@ bikeSpeed_kmh = bikeSpeed_ms * 3.6     # equivalently, * 0.9 km/h per LSB
 
 Stationary floor: raw 2 (~0.5 m/s, 1.8 km/h) — doppler noise floor above true zero; raw 0 not observed.
 
-Firmware ceiling: raw 50 (~12.5 m/s, 45 km/h); no values above 50 observed.
+Observed ceiling: raw 63 (~15.75 m/s, 56.7 km/h), seen as a single-frame peak at the top of two independent downhill segments across the capture corpus. Across 6,499 device-status frames spanning multiple commute sessions, no value above 63 has been observed and bits 6-7 are never set. This is consistent both with a plain uint8 field whose dynamic range simply isn't reached by everyday cycling and with a 6-bit field with reserved upper bits; current data does not distinguish. Decoders should accept the full `[0, 255]` range to remain robust if larger values appear in the future, but should not assume the field is confirmed-uint8. An earlier revision of this document claimed a raw-50 firmware ceiling; that claim is retracted.
 
 5-byte sparse frames carry the sub-header bytes without the trailing speed byte. Decoders should leave their cached bike-speed unchanged on a sparse frame.
 
