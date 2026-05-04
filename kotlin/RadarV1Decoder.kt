@@ -45,13 +45,12 @@ class RadarV1Decoder(
 
     private fun ingestThreat(payload: ByteArray, now: Long): Boolean {
         var changed = pruneStale(now)
-        val n = (payload.size - 1) / 3
-        for (i in 0 until n) {
-            val vid = payload[1 + 3 * i].toInt() and 0xFF
-            val dist = payload[1 + 3 * i + 1].toInt() and 0xFF
-            val flag = payload[1 + 3 * i + 2].toInt() and 0xFF
-            if (vid == 0x00 || vid == 0xFD || vid < 0x80) continue
-            if (dist == 0xFF) continue
+        payload.drop(1).chunked(3).forEach { triple ->
+            val vid = triple[0].toInt() and 0xFF
+            val dist = triple[1].toInt() and 0xFF
+            val flag = triple[2].toInt() and 0xFF
+            if (vid == 0x00 || vid == 0xFD || vid < 0x80) return@forEach
+            if (dist == 0xFF) return@forEach
             val id = vid and 0x7F
             val existing = tracks[id]?.vehicle
             val size = existing?.size ?: VehicleSize.CAR
@@ -67,10 +66,7 @@ class RadarV1Decoder(
 
     private fun pruneStale(now: Long): Boolean {
         val before = tracks.size
-        val it = tracks.entries.iterator()
-        while (it.hasNext()) {
-            if (now - it.next().value.lastSeen > staleMs) it.remove()
-        }
+        tracks.values.removeAll { now - it.lastSeen > staleMs }
         return tracks.size != before
     }
 

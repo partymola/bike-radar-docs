@@ -76,65 +76,63 @@ class RadarV2Decoder(
 
     private fun ingestTargets(payload: ByteArray, now: Long): Boolean {
         var changed = pruneStale(now)
-        val bodyLen = payload.size - HEADER_SIZE
-        val n = bodyLen / TARGET_SIZE
-        for (i in 0 until n) {
+        val n = (payload.size - HEADER_SIZE) / TARGET_SIZE
+        repeat(n) { i ->
             val off = HEADER_SIZE + i * TARGET_SIZE
             val tid = payload[off].toInt() and 0xFF
-            val cls = payload[off + 1].toInt() and 0xFF
-
-            // Bytes [2..4] are a 24-bit little-endian packed word:
-            //   bits 0..10  = rangeX (11-bit signed, x0.1 m)
-            //   bits 11..23 = rangeY (13-bit signed, x0.1 m)
-            val b2 = payload[off + 2].toInt() and 0xFF
-            val b3 = payload[off + 3].toInt() and 0xFF
-            val b4 = payload[off + 4].toInt() and 0xFF
-            val packed = b2 or (b3 shl 8) or (b4 shl 16)
-            var rxBits = packed and 0x07FF
-            if (rxBits and 0x0400 != 0) rxBits -= 0x0800
-            var ryBits = (packed shr 11) and 0x1FFF
-            if (ryBits and 0x1000 != 0) ryBits -= 0x2000
-            val rangeX = rxBits * 0.1f
-            val rangeY = ryBits * 0.1f       // > 0 = behind, < 0 = ahead
-
-            val speedY = payload[off + 7].toInt() * 0.5f
-
-            val distance = abs(rangeY).toInt()
-            val isBehind = rangeY > 0f
-            val speedMs = speedY.toInt()
-            val size = classifySize(cls)
-            val lateralPos = (rangeX / LATERAL_FULL_M).coerceIn(-1f, 1f)
-
-            // Split stale window: moving tracks must refresh quickly to avoid
-            // ghost boxes after they overtake (Doppler resolves them until
-            // they are abeam, then they vanish in a single frame). Stopped
-            // tracks (a vehicle queuing behind the bike at a red light) are
-            // Doppler-invisible so we keep them longer.
-            val stale = if (abs(speedMs) > MOVING_SPEED_MS) STALE_MOVING_MS else STALE_PARKED_MS
-
-            tracks[tid] = Track(
-                vehicle = Vehicle(
-                    id = tid,
-                    distanceM = distance,
-                    speedMs = speedMs,
-                    size = size,
-                    lateralPos = lateralPos,
-                ),
-                lastSeen = now,
-                staleMs = stale,
-            )
+            tracks[tid] = decodeTarget(payload, off, tid, now)
             changed = true
         }
         return changed
     }
 
+    private fun decodeTarget(payload: ByteArray, off: Int, tid: Int, now: Long): Track {
+        val cls = payload[off + 1].toInt() and 0xFF
+
+        // Bytes [2..4] are a 24-bit little-endian packed word:
+        //   bits 0..10  = rangeX (11-bit signed, x0.1 m)
+        //   bits 11..23 = rangeY (13-bit signed, x0.1 m)
+        val b2 = payload[off + 2].toInt() and 0xFF
+        val b3 = payload[off + 3].toInt() and 0xFF
+        val b4 = payload[off + 4].toInt() and 0xFF
+        val packed = b2 or (b3 shl 8) or (b4 shl 16)
+        var rxBits = packed and 0x07FF
+        if (rxBits and 0x0400 != 0) rxBits -= 0x0800
+        var ryBits = (packed shr 11) and 0x1FFF
+        if (ryBits and 0x1000 != 0) ryBits -= 0x2000
+        val rangeX = rxBits * 0.1f
+        val rangeY = ryBits * 0.1f       // > 0 = behind, < 0 = ahead
+
+        val speedY = payload[off + 7].toInt() * 0.5f
+
+        val distance = abs(rangeY).toInt()
+        val speedMs = speedY.toInt()
+        val size = classifySize(cls)
+        val lateralPos = (rangeX / LATERAL_FULL_M).coerceIn(-1f, 1f)
+
+        // Split stale window: moving tracks must refresh quickly to avoid
+        // ghost boxes after they overtake (Doppler resolves them until
+        // they are abeam, then they vanish in a single frame). Stopped
+        // tracks (a vehicle queuing behind the bike at a red light) are
+        // Doppler-invisible so we keep them longer.
+        val stale = if (abs(speedMs) > MOVING_SPEED_MS) STALE_MOVING_MS else STALE_PARKED_MS
+
+        return Track(
+            vehicle = Vehicle(
+                id = tid,
+                distanceM = distance,
+                speedMs = speedMs,
+                size = size,
+                lateralPos = lateralPos,
+            ),
+            lastSeen = now,
+            staleMs = stale,
+        )
+    }
+
     private fun pruneStale(now: Long): Boolean {
         val before = tracks.size
-        val it = tracks.entries.iterator()
-        while (it.hasNext()) {
-            val t = it.next().value
-            if (now - t.lastSeen > t.staleMs) it.remove()
-        }
+        tracks.values.removeAll { now - it.lastSeen > it.staleMs }
         return tracks.size != before
     }
 
