@@ -1,4 +1,4 @@
-# varia-reader capture started 2026-04-17 20:04:18
+# BLE capture log
 # format: <unix_ms> <char_tail> <hex_bytes>
 # strategy_next_at_start=1  total=5
 # already bonded to AA:BB:CC:DD:EE:FF
@@ -1470,7 +1470,7 @@
 277532 3204 0248
 277621 3204 0258
 277711 3204 0268
-# disconnected status=19 at 2026-04-17 20:08:56
+# disconnected status=19
 # connected status=0, discovering services
 # service 6a4e2800-667b-11e3-949a-0800200c9a66
 # char 6a4e2803-667b-11e3-949a-0800200c9a66 [RWw]
@@ -1722,7 +1722,7 @@
 302621 3203 b2
 302828 3203 e2
 302890 3203 02
-# disconnected status=19 at 2026-04-17 20:09:21
+# disconnected status=19
 # connected status=0, discovering services
 # service 6a4e2800-667b-11e3-949a-0800200c9a66
 # char 6a4e2803-667b-11e3-949a-0800200c9a66 [RWw]
@@ -1969,7 +1969,7 @@
 327925 3203 22
 328074 3203 42
 328195 3203 72
-# disconnected status=19 at 2026-04-17 20:09:47
+# disconnected status=19
 # connected status=0, discovering services
 # service 6a4e2800-667b-11e3-949a-0800200c9a66
 # char 6a4e2803-667b-11e3-949a-0800200c9a66 [RWw]
@@ -2200,7 +2200,7 @@
 359951 3203 82
 360076 3203 a2
 360195 3203 d2
-# disconnected status=19 at 2026-04-17 20:10:19
+# disconnected status=19
 # connected status=0, discovering services
 # service 6a4e2800-667b-11e3-949a-0800200c9a66
 # char 6a4e2803-667b-11e3-949a-0800200c9a66 [RWw]
@@ -2431,7 +2431,7 @@
 379374 3203 02
 379500 3203 32
 379617 3203 52
-# disconnected status=19 at 2026-04-17 20:10:38
+# disconnected status=19
 # connected status=0, discovering services
 # service 6a4e2800-667b-11e3-949a-0800200c9a66
 # char 6a4e2803-667b-11e3-949a-0800200c9a66 [RWw]
@@ -2642,4 +2642,4 @@
 405288 3203 62
 405402 3203 82
 405521 3203 b2
-# disconnected status=19 at 2026-04-17 20:11:04
+# disconnected status=19

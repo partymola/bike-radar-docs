@@ -1,12 +1,12 @@
 # bike-radar-docs
 
-Protocol notes and reference decoders for Garmin Varia radar devices over BLE, written for interoperability with third-party clients.
+Protocol notes and reference decoders for the `6a4e3200`-family BLE GATT services used by some cycling-radar accessories, written for interoperability with third-party clients.
 
 This repo is a knowledge drop, not a finished product. It documents what the wire looks like and gives minimal, standalone decoders that anyone can run against a captured log. A more complete Android client exists and will be released here in stages.
 
 ## What's covered
 
-- The `6a4e3200` radar service on current-generation Varia devices (confirmed on a RearVue 820; other Varia radar devices probably share it but are untested here).
+- The `6a4e3200` radar service on currently-shipping rear-radar accessories in this device family (confirmed on a RearVue 820; other related devices probably share it but are untested here).
 - The legacy V1 stream on characteristic `6a4e3203` (heartbeats, threat packets, sector amplitude packets).
 - The V2 measurement stream on characteristic `6a4e3204` (per-target structs with lateral offset, length, width, lateral and longitudinal speed).
 - The pre-handshake sequence that unlocks V2 on the RearVue 820.
@@ -36,19 +36,17 @@ The Kotlin sources are lifted verbatim from a working Android app and depend onl
 
 ## Status
 
-Accurate as of 2026-04-18.
 
 - V1 (`3203`) decoding: confirmed across thousands of packets from real commutes.
-- V2 (`3204`) decoding: byte format confirmed against live captures from Varia Mobile; our own handshake replays it successfully. Real-road target decoding is tested against synthetic frames; end-to-end road validation is pending.
-- Pairing: verified on Android 16 / Pixel 10 Pro XL via both the Garmin Varia Mobile app and Settings -> Connected devices. Other Android versions and other phones untested.
-- The full Android app that drives this stack will be added once it's past its throwaway-harness phase.
+- V2 (`3204`) decoding: byte format confirmed against live captures; our own handshake replays it successfully. Real-road target decoding is tested against synthetic frames; end-to-end road validation is pending.
+- Pairing: verified on Android 16 / Pixel 10 Pro XL via both the manufacturer's official Android app and Settings -> Connected devices. Other Android versions and other phones untested.
 
 ## Prior art and credit
 
 - github.com/rale/radarble is the only public writeup of the V2 `6a4e3204` target struct I have found. No code from that repo was copied; the byte layout here was cross-checked against live captures.
 - github.com/Wunderfitz/harbour-tacho (C++, SailfishOS) is a long-running V1 client; the V1 layout here was cross-checked against its source.
 - github.com/kartoone/mybiketraffic (Monkey C) is a Garmin Connect IQ data-field and the closest public reference to V1 packet behaviour from inside the ConnectIQ radar API. The "V1 third byte = approach speed in m/s (multiply by 3.6 for km/h)" reading cited from it and from other public notes does not match real-road 820 captures, where that byte only ever takes values 0 or 1 (see [PROTOCOL.md](PROTOCOL.md) §V1 threat packet).
-- kartoone's ongoing Garmin developer-forum thread [Garmin Varia Rearvue 820 Radar development](https://forums.garmin.com/developer/connect-iq/f/discussion/431074/garmin-varia-rearvue-820-radar-development) is where most of this was discussed publicly; anyone with follow-up data or corrections is encouraged to post there as well as opening an issue here.
+- kartoone has an ongoing developer-forum thread covering the same territory; anyone with follow-up data or corrections is encouraged to participate there as well as opening an issue here.
 
 ## Licence
 
@@ -56,6 +54,6 @@ GPLv3 or later. See [LICENSE](LICENSE).
 
 ## Contributions welcome
 
-- More captures from other Varia models (RTL515, RTL516, Vue 870) so the GATT-variant table can be filled in.
+- More captures from other models in this radar family (e.g. RTL515, RTL516, Vue 870) so the GATT-variant table can be filled in.
 - Independent confirmation of the V2 unlock sequence on non-Pixel Android devices or on iOS.
 - Corrections or gaps in PROTOCOL.md.

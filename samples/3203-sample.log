@@ -1,4 +1,4 @@
-# varia-reader capture started 2026-04-16 01:07:11
+# BLE capture log
 # format: <unix_ms> <char_tail> <hex_bytes>
 # already bonded to AA:BB:CC:DD:EE:FF
 # connecting to RearVue AA:BB:CC:DD:EE:FF
@@ -895,4 +895,4 @@
 107148 3203 c2
 107238 3203 f2
 107416 3203 12
-# stopped at 2026-04-16 01:09:00 packets=869
+# stopped, packets=869

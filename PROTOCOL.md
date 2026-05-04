@@ -1,8 +1,6 @@
-# Garmin Varia BLE Protocol
+# Cycling-radar BLE protocol notes (`6a4e3200` family)
 
-Verified on a Garmin Varia RearVue 820 connected to a Pixel 10 Pro XL running Android 16. Most of this almost certainly applies to sibling devices (RTL515, RTL516, Vue 870) but the V2 unlock sequence has only been tested on the 820.
-
-Last updated: 2026-04-18.
+Verified on a RearVue 820 connected to a Pixel 10 Pro XL running Android 16. Most of this almost certainly applies to sibling devices in this family (RTL515, RTL516, Vue 870) but the V2 unlock sequence has only been tested on the 820.
 
 ## Contents
 
@@ -20,18 +18,18 @@ Last updated: 2026-04-18.
 
 - All multi-byte integers are little-endian unless noted.
 - Bit 0 = LSB.
-- Hex shown with `0x` prefix. Characteristic UUIDs written in the Garmin shorthand `6a4e3203` = `6a4e3203-667b-11e3-949a-0800200c9a66`.
-- "V1" and "V2" are our terms for the legacy and modern radar streams; Garmin does not publish names for them.
+- Hex shown with `0x` prefix. Characteristic UUIDs are abbreviated by their first 4 hex digits — e.g. `6a4e3203` = `6a4e3203-667b-11e3-949a-0800200c9a66`.
+- "V1" and "V2" are our terms for the legacy and modern radar streams; the manufacturer does not publish names for them.
 
 ## Advertisement
 
-- The advert carries the Bluetooth SIG "Member Service" UUID `0xfe1f` (Garmin Ltd; 128-bit form `0000fe1f-0000-1000-8000-00805f9b34fb`). Filtering on `0xfe1f` is a reliable pan-Varia scan filter.
-- RearVue 820 also advertises service UUID `6a4e3200` (the radar service). The Varia Vue (camera) does **not** advertise any `6a4e2xxx` or `abd2xxxx` services, only `0xfe1f`. Consequence: a passive `ScanFilter` built around `6a4e2800` or `6a4e2f00` misses the Vue; use `0xfe1f` to catch both.
+- The advert carries the Bluetooth SIG "Member Service" UUID `0xfe1f` (Garmin Ltd; 128-bit form `0000fe1f-0000-1000-8000-00805f9b34fb`). Filtering on `0xfe1f` is a reliable pan-family scan filter.
+- RearVue 820 also advertises service UUID `6a4e3200` (the radar service). The Vue (camera) does **not** advertise any `6a4e2xxx` or `abd2xxxx` services, only `0xfe1f`. Consequence: a passive `ScanFilter` built around `6a4e2800` or `6a4e2f00` misses the Vue; use `0xfe1f` to catch both.
 - Observed local names: `RearVue8` (clean), `VUE-NNNNN` (padded with trailing null bytes in the advert payload; the readable prefix is the serial).
 
 ## GATT services and characteristics
 
-Garmin shorthand format = first 4 hex digits, extended to `6a4e????-667b-11e3-949a-0800200c9a66`.
+Shorthand format = first 4 hex digits, extended to `6a4e????-667b-11e3-949a-0800200c9a66`.
 
 | Service | Name | Device scope |
 |---------|------|--------------|
@@ -180,9 +178,7 @@ rangeY_m   = rangeYBits * 0.1                                   # ±409.5 m theo
 
 Bytes [3] bits 3..7 are NOT a separate field; they are the upper 5 bits of the packed 24-bit word and decode as part of `rangeY`. Treating them as a "reserved chirp counter" was an early hypothesis that this document's previous revision propagated incorrectly.
 
-**History: prior incorrect decodings.** An earlier revision of this document described `byte[2..4]` as `rangeYLow + rangeYZone (3-bit) + rangeX (separate int8)`, with `rangeY = zone * 25.6 + byte[2] * 0.1`. That zone-counter interpretation places close tailgaters at ~25-30 m forward (the audit's flagship failure case) and produces phantom 200 m "ghost" frames. It is wrong, retracted as of this revision. The rale/radarble project has the right idea (24-bit packed, two signed fields) but uses big-endian byte order; the actual encoding is little-endian as documented above.
-
-This documentation describes the on-the-wire format of `6a4e3204` notifications observed from a RearVue 820 owned by the author. The byte layout given above is stated in this project's own variable names and is cross-checked against live captures; the pseudocode in this section is original to this project.
+**History: prior incorrect decodings.** An earlier revision of this document described `byte[2..4]` as `rangeYLow + rangeYZone (3-bit) + rangeX (separate int8)`, with `rangeY = zone * 25.6 + byte[2] * 0.1`. That zone-counter interpretation places close tailgaters at ~25-30 m forward and produces phantom 200 m "ghost" frames. It is wrong, retracted as of this revision. The actual encoding on the 820 firmware is little-endian; we believe earlier reference implementations assumed big-endian.
 
 Reference Python and Kotlin decoders are in `python/decode_3204.py` and `kotlin/RadarV2Decoder.kt`.
 
@@ -216,18 +212,18 @@ On the RearVue 820 the `6a4e3204` characteristic will accept a CCCD subscribe wi
 
 The RearVue 820 requires **LE Secure Connections** (AuthReq flag `SC = 1`). It will reject any pair request that proposes Legacy pairing with `SMP_PAIR_NOT_SUPPORT`.
 
-The Garmin Varia Mobile Android app handles this correctly (it runs through a privileged path that proposes `SC = 1`). iOS presumably does too, since Varia Mobile on iOS exists and pairs without user workarounds, but it is untested here. Android's stock `BluetoothDevice.createBond()` also handles it correctly when triggered from system UI (Settings -> Connected devices -> Pair new device). It is broken on at least **Pixel 10 Pro XL running Android 16** when triggered programmatically by a third-party app: the stack initiates pairing without the `SC` flag, the 820 rejects, and the app sees `SMP_PAIR_NOT_SUPPORT sec_level:0x0`. A diagnostic log line that identifies this case is `btif_dm_get_smp_config: SMP pairing options not found in stack configuration`, which reflects that `bt_stack.conf` is absent from the Android 16 image. There is no public API to set `AuthReq.SC` from userspace.
+The manufacturer's official Android app handles this correctly (it runs through a privileged path that proposes `SC = 1`). iOS presumably does too, since the manufacturer's iOS app exists and pairs without user workarounds, but it is untested here. Android's stock `BluetoothDevice.createBond()` also handles it correctly when triggered from system UI (Settings -> Connected devices -> Pair new device). It is broken on at least **Pixel 10 Pro XL running Android 16** when triggered programmatically by a third-party app: the stack initiates pairing without the `SC` flag, the 820 rejects, and the app sees `SMP_PAIR_NOT_SUPPORT sec_level:0x0`. A diagnostic log line that identifies this case is `btif_dm_get_smp_config: SMP pairing options not found in stack configuration`, which reflects that `bt_stack.conf` is absent from the Android 16 image. There is no public API to set `AuthReq.SC` from userspace.
 
 **Recommended approach for app developers**: do not call `createBond()` from your own code. Ask the user to pair once via either:
 
-1. Settings -> Connected devices -> Pair new device -> tap the Varia while it is in pair mode (long-press its button until the LED blinks red). Power-cycle the Varia after pairing to exit pair mode.
-2. The Garmin Varia Mobile app's own pair flow.
+1. Settings -> Connected devices -> Pair new device -> tap the radar while it is in pair mode (long-press its button until the LED blinks red). Power-cycle the radar after pairing to exit pair mode.
+2. The manufacturer's official Android app's own pair flow.
 
 Either path produces a phone-side bond with `PairingAlgorithm::SC(0x3)`, `le_enc_key_size:16`, `le_encrypted:T` (visible in `adb shell dumpsys bluetooth_manager | grep -A5 <mac>`), which is functionally identical for reusing. Your own service then connects without trying to bond; the stack reuses the phone-side LTK transparently.
 
 ### Pre-handshake battery dance
 
-Even with a LESC bond and the AMV handshake completed successfully, the 820 will stay in V1 mode unless the central performs a specific read-and-subscribe on the standard Battery Service **before** opening the AMV session. This mimics what the Varia Mobile app does and appears to function as an "authenticated modern central detected" signal.
+Even with a LESC bond and the AMV handshake completed successfully, the 820 will stay in V1 mode unless the central performs a specific read-and-subscribe on the standard Battery Service **before** opening the AMV session. This mimics what the official app does and appears to function as an "authenticated modern central detected" signal.
 
 The full verified sequence, post-connect, is:
 
@@ -235,11 +231,11 @@ The full verified sequence, post-connect, is:
 2. Discover services. Subscribe CCCDs on:
    - `6a4e2f11` (control indicate)
    - `6a4e2811` (AMV RX)
-   - Defer CCCDs on `6a4e3203`, `6a4e3204`, `6a4e2f12`, `6a4e2f14` for now. Observational note: Varia Mobile never writes the `6a4e3203` CCCD during a V2 session, and subscribing `6a4e3203` early appears to pin some firmware states into V1 mode.
+   - Defer CCCDs on `6a4e3203`, `6a4e3204`, `6a4e2f12`, `6a4e2f14` for now. Observational note: the official app never writes the `6a4e3203` CCCD during a V2 session, and subscribing `6a4e3203` early appears to pin some firmware states into V1 mode.
 3. **The gate**: on the standard Battery Service:
    - `READ 0x2a19` (Battery Level), one byte, returns battery percent.
    - Subscribe the CCCD of `0x2a19` for NOTIFY.
-4. Open the AMV session on `6a4e2821` with replies on `6a4e2811`. The full handshake is a sequence of write / indicate / write / indicate exchanges built on a replayable static payload with two prefix bytes (`pfxEnum`, `pfxCmd`) captured from the device's initial replies. A verbatim replay of the six frames sent by Varia Mobile works every time. The exact payloads run to roughly 150 bytes across six frames and are awkward to reproduce faithfully in prose; a reference btsnoop capture is included under `samples/` so the frames can be inspected in Wireshark's `btatt` dissector and cross-checked against your own replay.
+4. Open the AMV session on `6a4e2821` with replies on `6a4e2811`. The full handshake is a sequence of write / indicate / write / indicate exchanges built on a replayable static payload with two prefix bytes (`pfxEnum`, `pfxCmd`) captured from the device's initial replies. A verbatim replay of the six frames sent by the official app works every time. The exact payloads run to roughly 150 bytes across six frames and are awkward to reproduce faithfully in prose; a reference capture is included under `samples/` so the frames can be inspected in Wireshark's `btatt` dissector and cross-checked against your own replay.
 5. Post-handshake: `READ 0x2a24` (model), subscribe the CCCD of `6a4e3204`, `READ 0x2a26` (firmware), optional `READ 0x2a25` (serial).
 6. Within roughly 100 ms of the step-5 `6a4e3204` CCCD enable, V2 notifications start flowing.
 
@@ -256,7 +252,7 @@ For the benefit of anyone else going down this road:
 
 ### Minimal-subset work still to do
 
-The recipe above is the full Varia Mobile replay. It has not yet been bisected to prove the minimum. In particular it is not known whether step 3's `READ` alone suffices without the CCCD subscribe, or vice versa, or whether a single "touch" of the Battery Service is enough regardless of direction. A motivated capture-and-bisect session on a locked-down device would pin this down.
+The recipe above is the full official-app replay. It has not yet been bisected to prove the minimum. In particular it is not known whether step 3's `READ` alone suffices without the CCCD subscribe, or vice versa, or whether a single "touch" of the Battery Service is enough regardless of direction. A motivated capture-and-bisect session on a locked-down device would pin this down.
 
 ## Battery
 
@@ -265,7 +261,7 @@ Standard GATT Battery Service works on both the radar and the camera.
 - Service: `0000180f`.
 - Characteristic: `00002a19`, read returns a single uint8 percent.
 
-On the camera this is the easiest way to surface a battery reading in third-party apps: connect, read, disconnect. No bonding required for the read on either the RearVue 820 or the Varia Vue tested here.
+On the camera this is the easiest way to surface a battery reading in third-party apps: connect, read, disconnect. No bonding required for the read on either the RearVue 820 or the Vue tested here.
 
 ## Capture log format
 
@@ -291,9 +287,9 @@ You can capture this format with any BLE central that can log raw GATT notificat
 
 Issues / PRs welcome on any of these.
 
-1. Does the V2 unlock recipe apply to older Varia radar units (e.g. RTL515, RTL516) or to other current-generation Varia models? Only the RearVue 820 has been tested here.
+1. Does the V2 unlock recipe apply to older radar units in this family (e.g. RTL515, RTL516) or to other current-generation models? Only the RearVue 820 has been tested here.
 2. What exactly is the `0x00` / `0x01` flag in the V1 threat triplet? It is neither speed nor approach direction.
 3. What is the minimal subset of the Battery Service dance that unlocks V2? One read? One CCCD? Either?
-4. Are any of the `6a4e2800` service's other writable characteristics used during normal Varia Mobile operation?
+4. Are any of the `6a4e2800` service's other writable characteristics used during normal official-app operation?
 5. Does the 820 emit anything richer than sector amplitude in V1 mode that we have not decoded? `byte[2..4]` of the sector packet look like padding but have not been examined against known-angle targets.
 6. Is there an iOS equivalent of Android's LESC-pairing quirk, or does iOS always get this right via its standard pair flow?
