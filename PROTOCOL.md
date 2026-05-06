@@ -111,9 +111,9 @@ Detection rule: `len == 6` and `payload[0] == 0x06`.
 ```
 byte 0:  0x06              type tag
 byte 1:  mode/channel | sector    bits 3..2 = sector index (4 values); bit 7 toggles between two values (mode or channel, meaning unconfirmed)
-byte 2:  unknown (often 0)
-byte 3:  unknown (often 0)
-byte 4:  unknown (often 0)
+byte 2:  0x05              constant in observed traffic; semantics unverified
+byte 3:  0x00              constant in observed traffic; semantics unverified
+byte 4:  0x00              constant in observed traffic; semantics unverified
 byte 5:  amplitude (uint8)
 ```
 
@@ -379,7 +379,7 @@ Issues / PRs welcome on any of these.
 2. What exactly is the `0x00` / `0x01` flag in the V1 threat triplet? It is neither speed nor approach direction.
 3. What is the minimal subset of the Battery Service dance that unlocks V2? One read? One CCCD? Either?
 4. Are any of the `6a4e2800` service's other writable characteristics used during normal official-app operation?
-5. Does the 820 emit anything richer than sector amplitude in V1 mode that we have not decoded? `byte[2..4]` of the sector packet look like padding but have not been examined against known-angle targets.
+5. Does the 820 emit anything richer than sector amplitude in V1 mode that we have not decoded? `byte[2..4]` of the sector packet are constant `0x05 0x00 0x00` across thousands of observed packets; whether byte 2's `0x05` is a reserved value, a fixed channel id, or a firmware-version field that simply has not varied is unverified.
 6. Is there an iOS equivalent of Android's LESC-pairing quirk, or does iOS always get this right via its standard pair flow?
 7. Does the front camera's AMV `0x18` sub-mode toggle apply to other devices in this family, or only the front-camera light?
 8. What do the trailing status bytes in the `0x18` toggle replies represent? They vary across frames and across sessions.
