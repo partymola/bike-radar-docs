@@ -10,9 +10,10 @@ Verified on a RearVue 820 connected to a Pixel 10 Pro XL running Android 16. Mos
 4. [V1 stream: characteristic `6a4e3203`](#v1-stream-characteristic-6a4e3203)
 5. [V2 stream: characteristic `6a4e3204`](#v2-stream-characteristic-6a4e3204)
 6. [Unlocking V2: pairing and pre-handshake dance](#unlocking-v2-pairing-and-pre-handshake-dance)
-7. [Battery](#battery)
-8. [Capture log format](#capture-log-format)
-9. [Open questions](#open-questions)
+7. [Front-camera light: handshake and mode control](#front-camera-light-handshake-and-mode-control)
+8. [Battery](#battery)
+9. [Capture log format](#capture-log-format)
+10. [Open questions](#open-questions)
 
 ## Scope and conventions
 
@@ -58,8 +59,10 @@ Under `6a4e2800`:
 
 | Characteristic | Properties | Purpose |
 |----------------|-----------|---------|
-| `6a4e2811` | NOTIFY | AMV RX (replies from device) |
-| `6a4e2821` | WRITE | AMV TX (commands to device) |
+| `6a4e2811` | NOTIFY | AMV RX (rear-radar replies) |
+| `6a4e2821` | WRITE | AMV TX (rear-radar commands) |
+| `6a4e2810` | NOTIFY | AMV RX (front-camera replies) |
+| `6a4e2820` | WRITE | AMV TX (front-camera commands) |
 
 Under `0000180f`:
 
@@ -254,6 +257,91 @@ For the benefit of anyone else going down this road:
 
 The recipe above is the full official-app replay. It has not yet been bisected to prove the minimum. In particular it is not known whether step 3's `READ` alone suffices without the CCCD subscribe, or vice versa, or whether a single "touch" of the Battery Service is enough regardless of direction. A motivated capture-and-bisect session on a locked-down device would pin this down.
 
+## Front-camera light: handshake and mode control
+
+Verified on a front-camera light running firmware 5.80, paired to a Pixel 10 Pro running Android 16. The camera advertises only `0xfe1f` (no `6a4e2xxx` services in the advert; see [Advertisement](#advertisement)). It hosts the same `6a4e2800` and `6a4e2f00` services as the radar but uses a different AMV characteristic pair, and its handshake is shorter.
+
+### AMV characteristic pair
+
+The camera's AMV TX/RX pair is offset by one from the rear radar's:
+
+| Role | Camera | Rear radar |
+|------|--------|-----------|
+| AMV TX (write) | `6a4e2820` | `6a4e2821` |
+| AMV RX (notify) | `6a4e2810` | `6a4e2811` |
+
+Mixing the two pairs causes a silent handshake failure: the device accepts writes but never responds. Centrals that target both device classes must select the right pair per device.
+
+### Pre-handshake setup
+
+Same as the rear radar (see [Pre-handshake battery dance](#pre-handshake-battery-dance)):
+
+1. Subscribe CCCDs on `6a4e2f11` (control indicate) and `6a4e2810` (AMV RX, camera).
+2. `READ 0x2a19` on the standard Battery Service, then subscribe its CCCD.
+
+Subscribing `6a4e2f12`, `6a4e2f14`, `6a4e3203`, or `6a4e3204` is unnecessary and not done by the official app. (`6a4e3204` does not exist on the camera; the radar service `6a4e3200` is rear-radar only.)
+
+### AMV unlock sequence
+
+The first phase mirrors the rear radar:
+
+1. AMV cmd `04` (capability/version probe).
+2. AMV enumerate steps `00`, `01`, `02`, `03`, `04`. Each reply carries two prefix bytes captured for use in later frames.
+
+The camera adds a third phase not present on the radar: an AMV opcode `0x18` sub-mode toggle. Three frames are written to `6a4e2820` (AMV TX), with replies on `6a4e2810` (AMV RX). Frame format is 13 bytes:
+
+```
+00 SS 00 00 00 00 00 00 41 4d 56 18 PP
+```
+
+| Frame | `SS` | `PP` |
+|-------|------|------|
+| 1 | `00` | `02` |
+| 2 | `02` | `82` |
+| 3 | `00` | `02` |
+
+`41 4d 56` (ASCII `AMV`) at bytes 8-10 is the AMV signature, and byte 11 is the opcode (`0x18`). Each reply also carries the signature at bytes 8-10 and `0x18` at byte 11; match on those positions only. The trailing status bytes vary across frames and across sessions and should not be pinned.
+
+After the third reply, the front-camera handshake is complete. Mode-set writes (next section) succeed without further setup.
+
+### Differences from the rear-radar handshake
+
+The rear radar's post-handshake exchange does **not** apply on the camera:
+
+- **AMV cmd `0x16`** does return a reply, but it is 13 bytes (`00 01 00 00 00 00 00 00 41 4d 56 16 00 01`) and carries no `pfxCmd` byte at offset 13. The capability exchange built on `pfxCmd` is rear-radar specific.
+- **Device-ID push frame.** No notification of length > 20 bytes with `byte[0] >= 0x80` arrives. Waiting for one times out. The handshake completes at the third `0x18` reply.
+
+### Mode control: `6a4e2f11` / `6a4e2f14`
+
+Mode-set is a 3-byte write to `6a4e2f11` (WRITE_TYPE_DEFAULT):
+
+```
+07 00 NN
+```
+
+`NN` is the 1-based mode ordinal. Six modes are defined:
+
+| Mode | `NN` |
+|------|------|
+| High | `01` |
+| Medium | `02` |
+| Low | `03` |
+| Night flash | `04` |
+| Day flash | `05` |
+| Off | `06` |
+
+The write is acknowledged on `6a4e2f11` as an indicate of `20 07 01 [next]`.
+
+Mode state is published on `6a4e2f14` as 3-byte notifications:
+
+```
+01 [mode_zero_based] [flags]
+```
+
+- `byte[0] = 0x01` is the mode-state record tag. Filter on `len == 3 && byte[0] == 0x01`; `6a4e2f14` carries other notification types during connection setup.
+- `byte[1]` is the zero-based mode index (`0` = High through `5` = Off).
+- `byte[2]` is a small flags byte. Observed values: `0x10` (High), `0x11` (Medium), `0x12` (Low), `0x13` (Night flash), `0x14` (Day flash), `0x1F` (Off). The low nibble tracks the mode index; bit 4 is consistently set; `0x1F` for Off looks like a distinct sentinel rather than a continuation of the pattern.
+
 ## Battery
 
 Standard GATT Battery Service works on both the radar and the camera.
@@ -293,3 +381,6 @@ Issues / PRs welcome on any of these.
 4. Are any of the `6a4e2800` service's other writable characteristics used during normal official-app operation?
 5. Does the 820 emit anything richer than sector amplitude in V1 mode that we have not decoded? `byte[2..4]` of the sector packet look like padding but have not been examined against known-angle targets.
 6. Is there an iOS equivalent of Android's LESC-pairing quirk, or does iOS always get this right via its standard pair flow?
+7. Does the front camera's AMV `0x18` sub-mode toggle apply to other devices in this family, or only the front-camera light?
+8. What do the trailing status bytes in the `0x18` toggle replies represent? They vary across frames and across sessions.
+9. What does `[next]` in the `6a4e2f11` mode-set ack indicate (`20 07 01 [next]`) carry — a firmware-suggested next mode, an echo of the requested mode, or something else?
