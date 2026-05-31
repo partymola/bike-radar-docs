@@ -11,9 +11,10 @@ Verified on a RearVue 820 connected to a Pixel 10 Pro XL running Android 16. Mos
 5. [V2 stream: characteristic `6a4e3204`](#v2-stream-characteristic-6a4e3204)
 6. [Unlocking V2: pairing and pre-handshake dance](#unlocking-v2-pairing-and-pre-handshake-dance)
 7. [Front-camera light: handshake and mode control](#front-camera-light-handshake-and-mode-control)
-8. [Battery](#battery)
-9. [Capture log format](#capture-log-format)
-10. [Open questions](#open-questions)
+8. [Rear-radar tail-light: mode control](#rear-radar-tail-light-mode-control)
+9. [Battery](#battery)
+10. [Capture log format](#capture-log-format)
+11. [Open questions](#open-questions)
 
 ## Scope and conventions
 
@@ -51,9 +52,9 @@ Under `6a4e2f00`:
 
 | Characteristic | Properties | Purpose |
 |----------------|-----------|---------|
-| `6a4e2f11` | INDICATE | Control indicate |
+| `6a4e2f11` | INDICATE, WRITE | Control indicate; also the mode/config write channel for the front-camera light and rear-radar tail light |
 | `6a4e2f12` | INDICATE | Secondary indicate |
-| `6a4e2f14` | NOTIFY | Secondary notify |
+| `6a4e2f14` | NOTIFY | Secondary notify; carries front-camera and rear-radar tail-light mode-state |
 
 Under `6a4e2800`:
 
@@ -342,6 +343,101 @@ Mode state is published on `6a4e2f14` as 3-byte notifications:
 - `byte[1]` is the zero-based mode index (`0` = High through `5` = Off).
 - `byte[2]` is a small flags byte. Observed values: `0x10` (High), `0x11` (Medium), `0x12` (Low), `0x13` (Night flash), `0x14` (Day flash), `0x1F` (Off). The low nibble tracks the mode index; bit 4 is consistently set; `0x1F` for Off looks like a distinct sentinel rather than a continuation of the pattern.
 
+## Rear-radar tail-light: mode control
+
+Verified on the same RearVue 820 (Pixel 10 Pro XL, Android 16). The radar unit drives an integrated tail light whose mode can be set over the control service. Unlike the front camera, which is a separate device, the tail light shares the radar's own GATT link; there is no second connection. Each command below was confirmed by correlating it to the observed light behaviour and the resulting mode-state notification.
+
+### Service and characteristics
+
+Mode control reuses the same `6a4e2f00` control characteristics as the front camera:
+
+| Characteristic | Dir | Purpose |
+|----------------|-----|---------|
+| `6a4e2f11` | WRITE (WRITE_TYPE_DEFAULT) | command channel: mode-set, cycle-list config, slot-select |
+| `6a4e2f14` | NOTIFY | mode-state, plus a constant config blob and a short counter |
+
+The mode/config protocol is on `6a4e2f00`, not on the `6a4e2800` AMV channel; AMV is only the unlock handshake.
+
+### Mode types
+
+Each mode has a stable 1-byte **type** code, independent of the unit's button-cycle configuration:
+
+| Type | Mode |
+|------|------|
+| `0x11` | Solid (brightest) |
+| `0x12` | Peloton (solid, dimmer) |
+| `0x13` | Day flash |
+| `0x14` | Night flash |
+| `0x1F` | Off |
+| `0x01` | Custom (user-defined pattern) |
+
+The valid set is `{0x01, 0x11, 0x12, 0x13, 0x14, 0x1F}`. `0x10` and `0x15`-`0x1E` are no-ops: the light does not change.
+
+> **Day/night byte assignment differs from the front camera.** On this radar `0x13` = day flash and `0x14` = night flash. The front camera's `6a4e2f14` flags byte uses the opposite pairing (`0x13` = night flash, `0x14` = day flash; see [Mode control: `6a4e2f11` / `6a4e2f14`](#mode-control-6a4e2f11--6a4e2f14)). The type-byte space is shared across the family but the day/night labels are not interchangeable between devices - check per device.
+
+### Set current mode by type - `06 09 01 TT`
+
+```
+06 09 01 TT      TT = type byte from the table above
+```
+
+Sets the light to type `TT` immediately. This is an **output override**: it changes what the light does without moving the unit's selected cycle slot, so it never disturbs the rider's button-cycle configuration in the official app.
+
+Slot-independence was confirmed directly: `06 09 01 12` (Peloton) selected Peloton even though Peloton was not present in the test unit's configured cycle list. Any mode type can therefore be selected regardless of which modes the user has exposed on the device button. Example: `06 09 01 13` → day flash, `06 09 01 14` → night flash.
+
+> **Read-back caveat.** A type-override set this way does **not** update the `6a4e2f14` mode-state notification: during a type sweep the notification stayed at the previously selected slot's value while the light visibly changed. The notification reports the selected *slot*, not the current output. So `6a4e2f14` can detect a rider's physical button press (which does move the slot) but cannot confirm that your own `06 09 01 TT` write landed.
+
+### Configure the button-cycle list - `06 09 05 ...`
+
+The ordered list of types reachable by the unit's physical button is read and written with opcode `06 09 05`:
+
+```
+06 09 05 [T0 T1 T2 ...] ff ff      write: set the cycle list (ff-padded)
+06 09 05                           query: unit replies with the current list
+```
+
+Observed writes, confirmed against edits made in the official app:
+
+| Bytes | Cycle list |
+|-------|-----------|
+| `06 09 05 14 11 1f 13 ff ff` | night flash, solid, off, day flash |
+| `06 09 05 14 11 13 ff ff ff` | night flash, solid, day flash |
+| `06 09 05 13 14 11 ff ff ff` | day flash, night flash, solid |
+| `06 09 05 13 14 11 01 ff ff` | day flash, night flash, solid, custom |
+
+A central that wants a mode reachable from the physical button (rather than only overriding the output) writes the desired list here. For a simple day/night automation the set-by-type command above is preferable: it needs no knowledge of, and makes no change to, the user's list.
+
+### Select a cycle slot by ordinal - `07 00 NN`
+
+```
+07 00 NN         NN = 1-based slot ordinal
+```
+
+Selects whichever mode currently occupies slot `NN`. This is the same `07 00 NN` opcode the front camera uses for its mode ordinals. Because the result depends entirely on the current cycle-list contents, it is fragile for automation; set-by-type is the robust alternative.
+
+### Mode-state notification - `6a4e2f14`
+
+The unit publishes its selected-slot state as a 4-byte notification:
+
+```
+01 [slot] ff [type]
+```
+
+- `byte[0] = 0x01` is the mode-state record tag.
+- `byte[1]` is the selected cycle-slot ordinal (0-based).
+- `byte[2] = 0xff` is constant.
+- `byte[3]` is the type byte of the mode in that slot.
+
+Filter on `len == 4 && byte[0] == 0x01 && byte[2] == 0xff`. `6a4e2f14` also carries an 11-byte config blob (`00 60 00 00 00 00 12 00 00 00 00`, constant in observed traffic) and 2-byte counter/ack records (`02 NN`), both of which fail this filter. This is the 4-byte rear-radar shape; the front camera's `6a4e2f14` mode-state is a different 3-byte record (`01 [mode] [flags]`).
+
+### Custom mode - `03 29 ...` (partial)
+
+Opcode `03 29` defines and queries the user-defined custom pattern (type `0x01`). A custom pattern of solid 100%, then 50% for 1 s, 0% for 10 ms, 70% for 600 ms was observed as `03 29 ff 32 7f 64 00 0a b2 3c 00 ...`, where brightness appears as a direct percentage byte (`0x64` = 100%, `0x32` = 50%). The full per-segment timing encoding and the trailing checksum are not decoded; see [Open questions](#open-questions).
+
+### Subscribing `6a4e2f14` does not pin V1
+
+The [V2 unlock notes](#unlocking-v2-pairing-and-pre-handshake-dance) warn that subscribing the `6a4e3203` CCCD can hold the radar in V1 mode. Subscribing `6a4e2f14` does **not** have this effect: enabling its CCCD *after* the V2 handshake, to read tail-light mode-state, left the V2 stream flowing normally. `6a4e3203` is the characteristic to avoid; `6a4e2f14` is safe.
+
 ## Battery
 
 Standard GATT Battery Service works on both the radar and the camera.
@@ -384,3 +480,6 @@ Issues / PRs welcome on any of these.
 7. Does the front camera's AMV `0x18` sub-mode toggle apply to other devices in this family, or only the front-camera light?
 8. What do the trailing status bytes in the `0x18` toggle replies represent? They vary across frames and across sessions.
 9. What does `[next]` in the `6a4e2f11` mode-set ack indicate (`20 07 01 [next]`) carry — a firmware-suggested next mode, an echo of the requested mode, or something else?
+10. What is the full segment-timing encoding (and trailing checksum) of the rear-radar tail-light custom mode (`03 29`)? Only the brightness percentage bytes are decoded.
+11. Does the rear-radar set-by-type command (`06 09 01 TT`) work on other devices in this family, or is the tail-light type table specific to the 820?
+12. What does the rear-radar `6a4e2f14` 11-byte config blob (`00 60 00 00 00 00 12 00 00 00 00`) encode? It is constant in observed traffic.
