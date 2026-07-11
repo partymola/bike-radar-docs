@@ -17,8 +17,8 @@ import kotlin.math.abs
  *
  * Target struct (9 bytes):
  *   [0]    uint8  targetId       radar-assigned track ID
- *   [1]    uint8  targetClass    enum (HIGH=36, NORMAL=23, NORMAL_STABLE=26,
- *                                 LOW=16, LOW_STABLE=13, UNKNOWN=4)
+ *   [1]    uint8  targetClass    enum (STRONG=36, MEDIUM=23, MEDIUM_HOLD=26,
+ *                                 WEAK=16, WEAK_HOLD=13, UNCLASSIFIED=4)
  *   [2..4] packed range field    24-bit little-endian (see decoding below)
  *   [5]    uint8  length         x0.25 m (class template; not a real measurement)
  *   [6]    uint8  width          x0.25 m (class template; not a real measurement)
