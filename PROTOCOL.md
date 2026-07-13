@@ -12,9 +12,10 @@ Verified on a RearVue 820 connected to a Pixel 10 Pro XL running Android 16. Mos
 6. [Unlocking V2: pairing and pre-handshake dance](#unlocking-v2-pairing-and-pre-handshake-dance)
 7. [Front-camera light: handshake and mode control](#front-camera-light-handshake-and-mode-control)
 8. [Rear-radar tail-light: mode control](#rear-radar-tail-light-mode-control)
-9. [Battery](#battery)
-10. [Capture log format](#capture-log-format)
-11. [Open questions](#open-questions)
+9. [Subscribing `6a4e3203` early pins V1](#subscribing-6a4e3203-early-pins-v1)
+10. [Battery](#battery)
+11. [Capture log format](#capture-log-format)
+12. [Open questions](#open-questions)
 
 ## Scope and conventions
 
@@ -235,7 +236,7 @@ The full verified sequence, post-connect, is:
 2. Discover services. Subscribe CCCDs on:
    - `6a4e2f11` (control indicate)
    - `6a4e2811` (AMV RX)
-   - Defer CCCDs on `6a4e3203`, `6a4e3204`, `6a4e2f12`, `6a4e2f14` for now. Observational note: the official app never writes the `6a4e3203` CCCD during a V2 session, and subscribing `6a4e3203` early appears to pin some firmware states into V1 mode.
+   - Defer CCCDs on `6a4e3203`, `6a4e3204`, `6a4e2f12`, `6a4e2f14` for now. The official app never writes the `6a4e3203` CCCD during a V2 session, and subscribing `6a4e3203` at this point pins the radar into V1 mode - see [Subscribing `6a4e3203` early pins V1](#subscribing-6a4e3203-early-pins-v1).
 3. **The gate**: on the standard Battery Service:
    - `READ 0x2a19` (Battery Level), one byte, returns battery percent.
    - Subscribe the CCCD of `0x2a19` for NOTIFY.
@@ -437,6 +438,24 @@ Opcode `03 29` defines and queries the user-defined custom pattern (type `0x01`)
 ### Subscribing `6a4e2f14` does not pin V1
 
 The [V2 unlock notes](#unlocking-v2-pairing-and-pre-handshake-dance) warn that subscribing the `6a4e3203` CCCD can hold the radar in V1 mode. Subscribing `6a4e2f14` does **not** have this effect: enabling its CCCD *after* the V2 handshake, to read tail-light mode-state, left the V2 stream flowing normally. `6a4e3203` is the characteristic to avoid; `6a4e2f14` is safe.
+
+## Subscribing `6a4e3203` early pins V1
+
+Which stream the unlock turns on depends on the pre-handshake state. RearVue 820, fw 6.70, one trial per row:
+
+| `6a4e3203` CCCD written | `6a4e3203` | `6a4e3204` |
+|---|---|---|
+| Before the [battery dance](#pre-handshake-battery-dance) + AMV session | V1 heartbeats | never emits |
+| After a successful V2 unlock | silent | unaffected (frame cadence unchanged) |
+| No unlock at all | silent | silent |
+
+Written early, the handshake still reports success and the CCCD reads back `0x0001`: the write is accepted, and the radar unlocks into V1.
+
+The pin outlives the connection. Later connections that never touched the CCCD also got no V2 - handshake complete, `6a4e3204` silent - across every reconnect until the test was stopped. A power-cycle restored V2. Whether the pin expires on its own was not tested; [What was not the gate](#what-was-not-the-gate) records the mirror case, where V2 mode is briefly retained across reconnects.
+
+So V1 is not a dead path on 6.70, but no tested configuration produced both streams: selecting V1 costs V2, and keeps costing it across reconnects. The failure is silent - link up, handshake OK, zero targets.
+
+Untested: the CCCD written *between* the battery dance and the AMV session; and whether the AMV session alone, without the battery dance, starts V1.
 
 ## Battery
 
