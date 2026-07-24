@@ -17,3 +17,7 @@ venv/
 # Defensive: never commit local config from the parent project
 local.properties
 *.keystore
+
+# Defensive: never commit stray binaries or generated sources
+*.apk
+*.java

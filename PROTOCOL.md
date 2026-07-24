@@ -1,6 +1,6 @@
 # Cycling-radar BLE protocol notes (`6a4e3200` family)
 
-Verified on a RearVue 820 connected to a Pixel 10 Pro XL running Android 16. Most of this almost certainly applies to sibling devices in this family (RTL515, RTL516, Vue 870) but the V2 unlock sequence has only been tested on the 820.
+Verified on a RearVue 820 connected to a Pixel 10 Pro XL running Android 16. Most of this almost certainly applies to sibling radar devices in this family (e.g. RTL515, RTL516) but the V2 enabling sequence has only been tested on the 820.
 
 ## Contents
 
@@ -9,7 +9,7 @@ Verified on a RearVue 820 connected to a Pixel 10 Pro XL running Android 16. Mos
 3. [GATT services and characteristics](#gatt-services-and-characteristics)
 4. [V1 stream: characteristic `6a4e3203`](#v1-stream-characteristic-6a4e3203)
 5. [V2 stream: characteristic `6a4e3204`](#v2-stream-characteristic-6a4e3204)
-6. [Unlocking V2: pairing and pre-handshake dance](#unlocking-v2-pairing-and-pre-handshake-dance)
+6. [Enabling V2: pairing and pre-handshake sequence](#enabling-v2-pairing-and-pre-handshake-sequence-informally-the-v2-unlock)
 7. [Front-camera light: handshake and mode control](#front-camera-light-handshake-and-mode-control)
 8. [Rear-radar tail-light: mode control](#rear-radar-tail-light-mode-control)
 9. [Subscribing `6a4e3203` early pins V1](#subscribing-6a4e3203-early-pins-v1)
@@ -47,7 +47,7 @@ Under `6a4e3200`:
 | Characteristic | Properties | Purpose |
 |----------------|-----------|---------|
 | `6a4e3203` | NOTIFY | V1 stream: heartbeats, threat packets, sector amplitude |
-| `6a4e3204` | NOTIFY | V2 stream: per-target structs, gated behind the unlock sequence |
+| `6a4e3204` | NOTIFY | V2 stream: per-target structs, emitted only after the connection sequence below |
 
 Under `6a4e2f00`:
 
@@ -104,7 +104,7 @@ Vehicle id rules:
 
 The flag byte is **not** a velocity in m/s. Across 28,690 valid vehicle triplets sampled from real commutes it only ever takes two values: `0x00` (96.87%) and `0x01` (3.13%). A `0x01` correlates weakly and inversely with "approaching": it fires on roughly 0.2% of transitions from farther to nearer and 14.6% of transitions from nearer to farther. Its semantics are not yet pinned down. Prior public writeups that describe this byte as "approach speed in m/s, multiply by 3.6 for km/h" are wrong; real velocity is carried by the V2 stream instead.
 
-Fragmentation: the harbour-tacho source documents a fragmentation rule where, if `seq(N+1) == seq(N) + 2`, the continuation packet's vehicles are prepended with the previous packet's vehicles. We have never observed this in practice on the 820. A scan over 26,472 V1 threat packets across nine captures found zero continuation pairs; every seq byte had low nibble `0x2` and no packet's seq was exactly the previous seq plus two. A stateful decoder that ages tracks out after roughly 2 seconds reconstructs the same vehicle set without ever needing to merge fragments. Reference implementations in this repo therefore do not implement the merge rule. If someone captures a fragmented stream on a different model, please open an issue.
+Fragmentation: the harbour-tacho source documents a fragmentation rule where, if `seq(N+1) == seq(N) + 2`, the continuation packet's vehicles are prepended with the previous packet's vehicles. We have never observed this in practice on the 820. A scan over 26,472 V1 threat packets across nine captures found zero continuation pairs; every seq byte had low nibble `0x2` and no packet's seq was exactly the previous seq plus two. The Kotlin reference decoder is stateful and ages tracks out after roughly 2 seconds, so it reconstructs the same vehicle set without merging fragments at all; the Python inspection CLI does flag a packet whose seq is exactly the previous seq plus two and prepends the earlier vehicles (marked `[+frag]`), but on the 820 that branch never fires. If someone captures a fragmented stream on a different model, please open an issue.
 
 ### V1 sector amplitude packet (6 bytes)
 
@@ -142,7 +142,7 @@ A payload of exactly 2 bytes with no target body is a "heartbeat" and is emitted
 | Offset | Field | Decode |
 |--------|-------|--------|
 | 0 | `targetId` | uint8 radar-assigned track id |
-| 1 | `targetClass` | enum (observed values, project-native names): `STRONG=36`, `MEDIUM=23`, `MEDIUM_HOLD=26`, `WEAK=16`, `WEAK_HOLD=13`, `UNCLASSIFIED=4`. Higher numeric value = larger / more confident return signature. |
+| 1 | `targetClass` | enum (observed values, project-native names): `LARGE=36`, `MODERATE=23`, `MODERATE_ALT=26`, `FAINT=16`, `FAINT_ALT=13`, `UNKNOWN=4`. Higher numeric value = larger / more confident return signature. |
 | 2..4 | `rangeY` + `rangeX` | 24-bit little-endian packed; see decoding below |
 | 5 | `lengthMeters` | uint8, multiply by 0.25 for metres (class-template, not a measurement) |
 | 6 | `widthMeters` | uint8, multiply by 0.25 for metres (class-template, not a measurement) |
@@ -209,15 +209,15 @@ Observed ceiling: raw 63 (~15.75 m/s, 56.7 km/h), seen as a single-frame peak at
 
 5-byte sparse frames carry the sub-header bytes without the trailing speed byte. Decoders should leave their cached bike-speed unchanged on a sparse frame.
 
-## Unlocking V2: pairing and pre-handshake dance
+## Enabling V2: pairing and pre-handshake sequence (informally, "the V2 unlock")
 
-On the RearVue 820 the `6a4e3204` characteristic will accept a CCCD subscribe without complaint, but the device stays in V1 mode and nothing is ever notified on it. To unlock V2 you need two things: a LESC bond, and a specific pre-handshake read-and-subscribe on the standard Battery Service before opening the AMV session.
+On the RearVue 820 the `6a4e3204` characteristic will accept a CCCD subscribe without complaint, but the device stays in V1 mode and nothing is ever notified on it. To enable V2 you need two things: a LESC bond, and a specific pre-handshake read-and-subscribe on the standard Battery Service before opening the AMV session.
 
 ### LESC bonding
 
 The RearVue 820 requires **LE Secure Connections** (AuthReq flag `SC = 1`). It will reject any pair request that proposes Legacy pairing with `SMP_PAIR_NOT_SUPPORT`.
 
-The manufacturer's official Android app handles this correctly (it runs through a privileged path that proposes `SC = 1`). iOS presumably does too, since the manufacturer's iOS app exists and pairs without user workarounds, but it is untested here. Android's stock `BluetoothDevice.createBond()` also handles it correctly when triggered from system UI (Settings -> Connected devices -> Pair new device). It is broken on at least **Pixel 10 Pro XL running Android 16** when triggered programmatically by a third-party app: the stack initiates pairing without the `SC` flag, the 820 rejects, and the app sees `SMP_PAIR_NOT_SUPPORT sec_level:0x0`. A diagnostic log line that identifies this case is `btif_dm_get_smp_config: SMP pairing options not found in stack configuration`, which reflects that `bt_stack.conf` is absent from the Android 16 image. There is no public API to set `AuthReq.SC` from userspace.
+The manufacturer's official Android app pairs successfully, as does Android's own Settings pairing flow (Settings -> Connected devices -> Pair new device); both produce an `SC` bond. iOS presumably does too, since the manufacturer's iOS app exists and pairs without user workarounds, but it is untested here. What breaks is `BluetoothDevice.createBond()` called programmatically by a third-party app, on at least **Pixel 10 Pro XL running Android 16**: the stack initiates pairing without the `SC` flag, the 820 rejects, and the app sees `SMP_PAIR_NOT_SUPPORT sec_level:0x0`. A diagnostic log line that identifies this case is `btif_dm_get_smp_config: SMP pairing options not found in stack configuration`, which reflects that `bt_stack.conf` is absent from the Android 16 image. There is no public API to set `AuthReq.SC` from userspace.
 
 **Recommended approach for app developers**: do not call `createBond()` from your own code. Ask the user to pair once via either:
 
@@ -226,9 +226,9 @@ The manufacturer's official Android app handles this correctly (it runs through 
 
 Either path produces a phone-side bond with `PairingAlgorithm::SC(0x3)`, `le_enc_key_size:16`, `le_encrypted:T` (visible in `adb shell dumpsys bluetooth_manager | grep -A5 <mac>`), which is functionally identical for reusing. Your own service then connects without trying to bond; the stack reuses the phone-side LTK transparently.
 
-### Pre-handshake battery dance
+### Pre-handshake Battery Service step
 
-Even with a LESC bond and the AMV handshake completed successfully, the 820 will stay in V1 mode unless the central performs a specific read-and-subscribe on the standard Battery Service **before** opening the AMV session. This mimics what the official app does and appears to function as an "authenticated modern central detected" signal.
+Even with a LESC bond and the AMV handshake completed successfully, the 820 will stay in V1 mode unless the central performs a specific read-and-subscribe on the standard Battery Service **before** opening the AMV session. The manufacturer's app performs the same read and subscribe. Nothing in the exchange is secret or key-derived - `0x2a19` is a Bluetooth SIG standard characteristic that any central can read - so the most likely explanation is a firmware capability check: a central that exercises the standard Battery Service is treated as supporting the modern stream, and one that does not falls back to the legacy stream.
 
 The full verified sequence, post-connect, is:
 
@@ -237,31 +237,31 @@ The full verified sequence, post-connect, is:
    - `6a4e2f11` (control indicate)
    - `6a4e2811` (AMV RX)
    - Defer CCCDs on `6a4e3203`, `6a4e3204`, `6a4e2f12`, `6a4e2f14` for now. The official app never writes the `6a4e3203` CCCD during a V2 session, and subscribing `6a4e3203` at this point pins the radar into V1 mode - see [Subscribing `6a4e3203` early pins V1](#subscribing-6a4e3203-early-pins-v1).
-3. **The gate**: on the standard Battery Service:
+3. **The Battery Service step**: on the standard Battery Service:
    - `READ 0x2a19` (Battery Level), one byte, returns battery percent.
    - Subscribe the CCCD of `0x2a19` for NOTIFY.
-4. Open the AMV session on `6a4e2821` with replies on `6a4e2811`. The full handshake is a sequence of write / indicate / write / indicate exchanges built on a replayable static payload with two prefix bytes (`pfxEnum`, `pfxCmd`) captured from the device's initial replies. A verbatim replay of the six frames sent by the official app works every time. The exact payloads run to roughly 150 bytes across six frames and are awkward to reproduce faithfully in prose; a reference capture is included under `samples/` so the frames can be inspected in Wireshark's `btatt` dissector and cross-checked against your own replay.
+4. Open the AMV session on `6a4e2821` with replies on `6a4e2811`. The session is a fixed sequence of six write / indicate exchanges. Each written payload is constant apart from a single leading byte taken from one of the device's own earlier replies - two distinct such values across the six frames: one for the first frame, one shared by the middle four, and that second value incremented by one for the final frame. Nothing is secret, key-derived, or computed over a device challenge: a central that emits the same byte sequence directly is accepted. `samples/3204-sample.log` records the device side of a complete exchange on `6a4e2811`, which is enough to align an independent implementation's replies against what the device expects. The central-side payloads are not reproduced here.
 5. Post-handshake: `READ 0x2a24` (model), subscribe the CCCD of `6a4e3204`, `READ 0x2a26` (firmware), optional `READ 0x2a25` (serial).
 6. Within roughly 100 ms of the step-5 `6a4e3204` CCCD enable, V2 notifications start flowing.
 
 Every fresh-connection attempt that skips step 3 stays in V1 mode; every one that includes it moves to V2. Validated across six consecutive strategy cycles in a single session.
 
-### What was **not** the gate
+### What was **not** the trigger
 
 For the benefit of anyone else going down this road:
 
 - Subscribing `6a4e2f12` or `6a4e2f14` CCCDs pre-handshake. No effect.
-- The `6a4e2f11` indicate writes (`20 04 01 10 04`) that follow the handshake. These are post-handshake housekeeping, not an unlock.
+- The `6a4e2f11` indicate writes (`20 04 01 10 04`) that follow the handshake. These are post-handshake housekeeping, and do not switch the stream.
 - Running the AMV handshake on its own. Necessary but insufficient.
 - Running the handshake three times in a row. The "cumulative" pattern in some earlier strategies was a red herring caused by the firmware briefly retaining V2 mode across reconnects.
 
 ### Minimal-subset work still to do
 
-The recipe above is the full official-app replay. It has not yet been bisected to prove the minimum. In particular it is not known whether step 3's `READ` alone suffices without the CCCD subscribe, or vice versa, or whether a single "touch" of the Battery Service is enough regardless of direction. A motivated capture-and-bisect session on a locked-down device would pin this down.
+The sequence above is the full one. It has not yet been bisected to prove the minimum. In particular it is not known whether step 3's `READ` alone suffices without the CCCD subscribe, or vice versa, or whether a single "touch" of the Battery Service is enough regardless of direction. A capture-and-bisect session on a controlled bench setup would pin this down.
 
 ## Front-camera light: handshake and mode control
 
-Verified on a front-camera light running firmware 5.80, paired to a Pixel 10 Pro running Android 16. The camera advertises only `0xfe1f` (no `6a4e2xxx` services in the advert; see [Advertisement](#advertisement)). It hosts the same `6a4e2800` and `6a4e2f00` services as the radar but uses a different AMV characteristic pair, and its handshake is shorter.
+Verified on a front-camera light running firmware 5.80, paired to a Pixel 10 Pro XL running Android 16. The camera advertises only `0xfe1f` (no `6a4e2xxx` services in the advert; see [Advertisement](#advertisement)). It hosts the same `6a4e2800` and `6a4e2f00` services as the radar but uses a different AMV characteristic pair, and its handshake is shorter.
 
 ### AMV characteristic pair
 
@@ -276,14 +276,14 @@ Mixing the two pairs causes a silent handshake failure: the device accepts write
 
 ### Pre-handshake setup
 
-Same as the rear radar (see [Pre-handshake battery dance](#pre-handshake-battery-dance)):
+Same as the rear radar (see [Pre-handshake Battery Service step](#pre-handshake-battery-service-step)):
 
 1. Subscribe CCCDs on `6a4e2f11` (control indicate) and `6a4e2810` (AMV RX, camera).
 2. `READ 0x2a19` on the standard Battery Service, then subscribe its CCCD.
 
 Subscribing `6a4e2f12`, `6a4e2f14`, `6a4e3203`, or `6a4e3204` is unnecessary and not done by the official app. (`6a4e3204` does not exist on the camera; the radar service `6a4e3200` is rear-radar only.)
 
-### AMV unlock sequence
+### AMV enabling sequence
 
 The first phase mirrors the rear radar:
 
@@ -310,7 +310,7 @@ After the third reply, the front-camera handshake is complete. Mode-set writes (
 
 The rear radar's post-handshake exchange does **not** apply on the camera:
 
-- **AMV cmd `0x16`** does return a reply, but it is 13 bytes (`00 01 00 00 00 00 00 00 41 4d 56 16 00 01`) and carries no `pfxCmd` byte at offset 13. The capability exchange built on `pfxCmd` is rear-radar specific.
+- **AMV cmd `0x16`** does return a reply, but it is 13 bytes (`00 01 00 00 00 00 00 00 41 4d 56 16 00 01`) and carries no capability byte at offset 13. The rear radar's capability exchange, which reuses a leading byte from that reply, does not apply to the camera.
 - **Device-ID push frame.** No notification of length > 20 bytes with `byte[0] >= 0x80` arrives. Waiting for one times out. The handshake completes at the third `0x18` reply.
 
 ### Mode control: `6a4e2f11` / `6a4e2f14`
@@ -357,7 +357,7 @@ Mode control reuses the same `6a4e2f00` control characteristics as the front cam
 | `6a4e2f11` | WRITE (WRITE_TYPE_DEFAULT) | command channel: mode-set, cycle-list config, slot-select |
 | `6a4e2f14` | NOTIFY | mode-state, plus a constant config blob and a short counter |
 
-The mode/config protocol is on `6a4e2f00`, not on the `6a4e2800` AMV channel; AMV is only the unlock handshake.
+The mode/config protocol is on `6a4e2f00`, not on the `6a4e2800` AMV channel; AMV is only the enabling handshake.
 
 ### Mode types
 
@@ -437,25 +437,25 @@ Opcode `03 29` defines and queries the user-defined custom pattern (type `0x01`)
 
 ### Subscribing `6a4e2f14` does not pin V1
 
-The [V2 unlock notes](#unlocking-v2-pairing-and-pre-handshake-dance) warn that subscribing the `6a4e3203` CCCD can hold the radar in V1 mode. Subscribing `6a4e2f14` does **not** have this effect: enabling its CCCD *after* the V2 handshake, to read tail-light mode-state, left the V2 stream flowing normally. `6a4e3203` is the characteristic to avoid; `6a4e2f14` is safe.
+The [V2 enabling notes](#enabling-v2-pairing-and-pre-handshake-sequence-informally-the-v2-unlock) warn that subscribing the `6a4e3203` CCCD can hold the radar in V1 mode. Subscribing `6a4e2f14` does **not** have this effect: enabling its CCCD *after* the V2 handshake, to read tail-light mode-state, left the V2 stream flowing normally. `6a4e3203` is the characteristic to avoid; `6a4e2f14` is safe.
 
 ## Subscribing `6a4e3203` early pins V1
 
-Which stream the unlock turns on depends on the pre-handshake state. RearVue 820, fw 6.70, one trial per row:
+Which stream is enabled depends on the pre-handshake state. RearVue 820, fw 6.70, one trial per row:
 
 | `6a4e3203` CCCD written | `6a4e3203` | `6a4e3204` |
 |---|---|---|
-| Before the [battery dance](#pre-handshake-battery-dance) + AMV session | V1 heartbeats | never emits |
-| After a successful V2 unlock | silent | unaffected (frame cadence unchanged) |
-| No unlock at all | silent | silent |
+| Before the [Battery Service step](#pre-handshake-battery-service-step) + AMV session | V1 heartbeats | never emits |
+| After V2 is successfully enabled | silent | unaffected (frame cadence unchanged) |
+| V2 never enabled | silent | silent |
 
-Written early, the handshake still reports success and the CCCD reads back `0x0001`: the write is accepted, and the radar unlocks into V1.
+Written early, the handshake still reports success and the CCCD reads back `0x0001`: the write is accepted, and the radar settles into V1.
 
-The pin outlives the connection. Later connections that never touched the CCCD also got no V2 - handshake complete, `6a4e3204` silent - across every reconnect until the test was stopped. A power-cycle restored V2. Whether the pin expires on its own was not tested; [What was not the gate](#what-was-not-the-gate) records the mirror case, where V2 mode is briefly retained across reconnects.
+The pin outlives the connection. Later connections that never touched the CCCD also got no V2 - handshake complete, `6a4e3204` silent - across every reconnect until the test was stopped. A power-cycle restored V2. Whether the pin expires on its own was not tested; [What was not the trigger](#what-was-not-the-trigger) records the mirror case, where V2 mode is briefly retained across reconnects.
 
 So V1 is not a dead path on 6.70, but no tested configuration produced both streams: selecting V1 costs V2, and keeps costing it across reconnects. The failure is silent - link up, handshake OK, zero targets.
 
-Untested: the CCCD written *between* the battery dance and the AMV session; and whether the AMV session alone, without the battery dance, starts V1.
+Untested: the CCCD written *between* the Battery Service step and the AMV session; and whether the AMV session alone, without it, starts V1.
 
 ## Battery
 
@@ -490,9 +490,9 @@ You can capture this format with any BLE central that can log raw GATT notificat
 
 Issues / PRs welcome on any of these.
 
-1. Does the V2 unlock recipe apply to older radar units in this family (e.g. RTL515, RTL516) or to other current-generation models? Only the RearVue 820 has been tested here.
+1. Does the V2 enabling sequence apply to older radar units in this family (e.g. RTL515, RTL516) or to other current-generation models? Only the RearVue 820 has been tested here.
 2. What exactly is the `0x00` / `0x01` flag in the V1 threat triplet? It is neither speed nor approach direction.
-3. What is the minimal subset of the Battery Service dance that unlocks V2? One read? One CCCD? Either?
+3. What is the minimal subset of the Battery Service step that enables V2? One read? One CCCD? Either?
 4. Are any of the `6a4e2800` service's other writable characteristics used during normal official-app operation?
 5. Does the 820 emit anything richer than sector amplitude in V1 mode that we have not decoded? `byte[2..4]` of the sector packet are constant `0x05 0x00 0x00` across thousands of observed packets; whether byte 2's `0x05` is a reserved value, a fixed channel id, or a firmware-version field that simply has not varied is unverified.
 6. Is there an iOS equivalent of Android's LESC-pairing quirk, or does iOS always get this right via its standard pair flow?

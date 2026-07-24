@@ -5,14 +5,14 @@
 
 Protocol notes and reference decoders for the `6a4e3200`-family BLE GATT services used by some cycling-radar accessories, written for interoperability with third-party clients.
 
-This repo is a knowledge drop, not a finished product. It documents what the wire looks like and gives minimal, standalone decoders that anyone can run against a captured log. A more complete Android client exists and will be released here in stages.
+This repo is a knowledge drop, not a finished product. It documents what the wire looks like and gives minimal, standalone decoders that anyone can run against a captured log.
 
 ## What's covered
 
 - The `6a4e3200` radar service on currently-shipping rear-radar accessories in this device family (confirmed on a RearVue 820; other related devices probably share it but are untested here).
 - The legacy V1 stream on characteristic `6a4e3203` (heartbeats, threat packets, sector amplitude packets).
 - The V2 measurement stream on characteristic `6a4e3204` (per-target structs with lateral offset, length, width, lateral and longitudinal speed).
-- The pre-handshake sequence that unlocks V2 on the RearVue 820.
+- The pre-handshake sequence that enables V2 on the RearVue 820.
 - The LESC (LE Secure Connections) pairing quirk that breaks programmatic `createBond()` on Android 16 / Pixel 10 Pro XL, and the workaround.
 
 See [PROTOCOL.md](PROTOCOL.md) for the full byte-level spec.
@@ -35,13 +35,13 @@ See [PROTOCOL.md](PROTOCOL.md) for the full byte-level spec.
     `-- README.md           # notes on capture log format + how to gather your own
 ```
 
-The Kotlin sources are lifted verbatim from a working Android app and depend only on standard library types. They compile against plain Kotlin/JVM; the JUnit tests run without Android instrumentation.
+The Kotlin sources are taken unchanged from my own Android client and depend only on standard library types. They compile against plain Kotlin/JVM; the JUnit tests run without Android instrumentation.
 
 ## Status
 
 
 - V1 (`3203`) decoding: confirmed across thousands of packets from real commutes.
-- V2 (`3204`) decoding: byte format confirmed against live captures; our own handshake replays it successfully. Real-road target decoding is tested against synthetic frames; end-to-end road validation is pending.
+- V2 (`3204`) decoding: byte format confirmed against live captures; our own handshake replays it successfully. Range and target decoding is validated statistically against real-commute captures (trajectory-smoothness and distance-distribution checks; see PROTOCOL.md); the automated tests use synthetic frames, and instrumented ground-truth (decoded distance vs independently measured) is still to do.
 - Pairing: verified on Android 16 / Pixel 10 Pro XL via both the manufacturer's official Android app and Settings -> Connected devices. Other Android versions and other phones untested.
 
 ## Prior art and credit
@@ -57,6 +57,6 @@ GPLv3 or later. See [LICENSE](LICENSE).
 
 ## Contributions welcome
 
-- More captures from other models in this radar family (e.g. RTL515, RTL516, Vue 870) so the GATT-variant table can be filled in.
-- Independent confirmation of the V2 unlock sequence on non-Pixel Android devices or on iOS.
+- More captures from other models in this radar family (e.g. RTL515, RTL516) so the GATT-variant table can be filled in.
+- Compatibility reports from other Android devices and from iOS: does the connection sequence in PROTOCOL.md produce the V2 stream on your hardware?
 - Corrections or gaps in PROTOCOL.md.
