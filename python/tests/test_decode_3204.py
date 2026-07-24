@@ -67,7 +67,7 @@ class TestParseTarget(unittest.TestCase):
         self.assertEqual(t.width, 0.0)
         self.assertEqual(t.speed_y, 0.0)
         self.assertEqual(t.speed_x, -64.0)  # default 0x80 sentinel
-        self.assertEqual(t.class_name, "UNCLASSIFIED")
+        self.assertEqual(t.class_name, "UNKNOWN")
 
     def test_range_y_positive_is_behind(self):
         # range_y_raw=100 -> 10.0 m behind the rider
@@ -158,9 +158,9 @@ class TestParseTarget(unittest.TestCase):
             t = parse_target(pack_target(0, code))
             self.assertEqual(t.class_name, name)
 
-    def test_class_name_unknown(self):
+    def test_class_name_unmapped(self):
         t = parse_target(pack_target(0, 99))
-        self.assertEqual(t.class_name, "UNKNOWN(99)")
+        self.assertEqual(t.class_name, "UNMAPPED(99)")
 
     def test_wrong_length_rejected(self):
         with self.assertRaises(ValueError):
@@ -181,21 +181,21 @@ class TestParseNotification(unittest.TestCase):
         self.assertEqual(len(frame.targets), 1)
         t = frame.targets[0]
         self.assertEqual(t.target_id, 5)
-        self.assertEqual(t.class_name, "MEDIUM")
+        self.assertEqual(t.class_name, "MODERATE")
         self.assertAlmostEqual(t.range_x, 1.5)
         self.assertAlmostEqual(t.range_y, 45.6)
         self.assertEqual(t.speed_y, -5.0)
 
     def test_multi_target(self):
-        t1 = pack_target(1, 23, range_x_raw=-15, range_y_raw=100)   # MEDIUM, -1.5 m, 10.0 m
-        t2 = pack_target(2, 36, range_y_raw=512)                    # STRONG, 51.2 m
-        t3 = pack_target(3, 13, range_x_raw=20, range_y_raw=306)    # WEAK_HOLD, +2.0 m, 30.6 m
+        t1 = pack_target(1, 23, range_x_raw=-15, range_y_raw=100)   # MODERATE, -1.5 m, 10.0 m
+        t2 = pack_target(2, 36, range_y_raw=512)                    # LARGE, 51.2 m
+        t3 = pack_target(3, 13, range_x_raw=20, range_y_raw=306)    # FAINT_ALT, +2.0 m, 30.6 m
         frame = parse_notification(pack_frame(0x0000, [t1, t2, t3]))
         self.assertEqual(len(frame.targets), 3)
         self.assertEqual([t.target_id for t in frame.targets], [1, 2, 3])
-        self.assertEqual(frame.targets[0].class_name, "MEDIUM")
-        self.assertEqual(frame.targets[1].class_name, "STRONG")
-        self.assertEqual(frame.targets[2].class_name, "WEAK_HOLD")
+        self.assertEqual(frame.targets[0].class_name, "MODERATE")
+        self.assertEqual(frame.targets[1].class_name, "LARGE")
+        self.assertEqual(frame.targets[2].class_name, "FAINT_ALT")
         self.assertAlmostEqual(frame.targets[0].range_x, -1.5)
         self.assertAlmostEqual(frame.targets[0].range_y, 10.0)
         self.assertAlmostEqual(frame.targets[1].range_y, 51.2)
@@ -266,7 +266,7 @@ class TestCaptureLineIteration(unittest.TestCase):
         self.assertEqual(len(frame.targets), 1)
         t = frame.targets[0]
         self.assertEqual(t.target_id, 9)
-        self.assertEqual(t.class_name, "STRONG")
+        self.assertEqual(t.class_name, "LARGE")
         self.assertAlmostEqual(t.range_x, -4.0)
         self.assertAlmostEqual(t.range_y, 81.8)
         self.assertEqual(t.speed_y, -10.0)

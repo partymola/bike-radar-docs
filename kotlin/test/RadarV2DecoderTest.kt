@@ -159,24 +159,24 @@ class RadarV2DecoderTest {
         assertEquals(10, state!!.vehicles[0].speedMs)  // +20 * 0.5 = +10 m/s
     }
 
-    @Test fun class_weak_is_bike() {
+    @Test fun class_faint_is_bike() {
         clock = 1000
-        for (cls in listOf(RadarV2Decoder.CLASS_WEAK, RadarV2Decoder.CLASS_WEAK_HOLD)) {
+        for (cls in listOf(RadarV2Decoder.CLASS_FAINT, RadarV2Decoder.CLASS_FAINT_ALT)) {
             decoder.reset()
             val state = decoder.feed(packFrame(0x0000, listOf(packTarget(1, cls, rangeYRaw = 100))))
             assertEquals(VehicleSize.BIKE, state!!.vehicles[0].size)
         }
     }
 
-    @Test fun class_strong_is_truck() {
+    @Test fun class_large_is_truck() {
         clock = 1000
-        val state = decoder.feed(packFrame(0x0000, listOf(packTarget(1, RadarV2Decoder.CLASS_STRONG, rangeYRaw = 100))))
+        val state = decoder.feed(packFrame(0x0000, listOf(packTarget(1, RadarV2Decoder.CLASS_LARGE, rangeYRaw = 100))))
         assertEquals(VehicleSize.TRUCK, state!!.vehicles[0].size)
     }
 
-    @Test fun class_medium_is_car() {
+    @Test fun class_moderate_is_car() {
         clock = 1000
-        for (cls in listOf(RadarV2Decoder.CLASS_MEDIUM, RadarV2Decoder.CLASS_UNCLASSIFIED)) {
+        for (cls in listOf(RadarV2Decoder.CLASS_MODERATE, RadarV2Decoder.CLASS_UNKNOWN)) {
             decoder.reset()
             val state = decoder.feed(packFrame(0x0000, listOf(packTarget(1, cls, rangeYRaw = 100))))
             assertEquals(VehicleSize.CAR, state!!.vehicles[0].size)

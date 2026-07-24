@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 the bike-radar-docs contributors.
-"""Decode 3204 (V2 measurement) notifications from a varia-reader capture file.
+"""Decode 3204 (V2 measurement) notifications from a capture file.
 
 Wire format per notification:
   [2-byte little-endian header] + N * [9-byte target struct]
@@ -57,12 +57,12 @@ STATUS_FRAME_BIT = 0x0001
 DEVICE_STATUS_BIT = 0x0004
 
 CLASS_NAMES = {
-    4:  "UNCLASSIFIED",
-    13: "WEAK_HOLD",
-    16: "WEAK",
-    23: "MEDIUM",
-    26: "MEDIUM_HOLD",
-    36: "STRONG",
+    4:  "UNKNOWN",
+    13: "FAINT_ALT",
+    16: "FAINT",
+    23: "MODERATE",
+    26: "MODERATE_ALT",
+    36: "LARGE",
 }
 
 
@@ -79,7 +79,7 @@ class Target:
 
     @property
     def class_name(self) -> str:
-        return CLASS_NAMES.get(self.target_class, f"UNKNOWN({self.target_class})")
+        return CLASS_NAMES.get(self.target_class, f"UNMAPPED({self.target_class})")
 
     @property
     def is_behind(self) -> bool:

@@ -17,8 +17,8 @@ import kotlin.math.abs
  *
  * Target struct (9 bytes):
  *   [0]    uint8  targetId       radar-assigned track ID
- *   [1]    uint8  targetClass    enum (STRONG=36, MEDIUM=23, MEDIUM_HOLD=26,
- *                                 WEAK=16, WEAK_HOLD=13, UNCLASSIFIED=4)
+ *   [1]    uint8  targetClass    enum (LARGE=36, MODERATE=23, MODERATE_ALT=26,
+ *                                 FAINT=16, FAINT_ALT=13, UNKNOWN=4)
  *   [2..4] packed range field    24-bit little-endian (see decoding below)
  *   [5]    uint8  length         x0.25 m (class template; not a real measurement)
  *   [6]    uint8  width          x0.25 m (class template; not a real measurement)
@@ -150,8 +150,8 @@ class RadarV2Decoder(
 
     /** Class-enum to size bucket. Class values are documented in PROTOCOL.md. */
     private fun classifySize(cls: Int): VehicleSize = when (cls) {
-        CLASS_WEAK, CLASS_WEAK_HOLD -> VehicleSize.BIKE
-        CLASS_STRONG -> VehicleSize.TRUCK
+        CLASS_FAINT, CLASS_FAINT_ALT -> VehicleSize.BIKE
+        CLASS_LARGE -> VehicleSize.TRUCK
         else -> VehicleSize.CAR
     }
 
@@ -181,11 +181,11 @@ class RadarV2Decoder(
 
         /** Target class enum (observed values, project-native names).
          *  Higher numeric value = larger / more confident return signature. */
-        const val CLASS_UNCLASSIFIED = 4
-        const val CLASS_WEAK_HOLD = 13
-        const val CLASS_WEAK = 16
-        const val CLASS_MEDIUM = 23
-        const val CLASS_MEDIUM_HOLD = 26
-        const val CLASS_STRONG = 36
+        const val CLASS_UNKNOWN = 4
+        const val CLASS_FAINT_ALT = 13
+        const val CLASS_FAINT = 16
+        const val CLASS_MODERATE = 23
+        const val CLASS_MODERATE_ALT = 26
+        const val CLASS_LARGE = 36
     }
 }
