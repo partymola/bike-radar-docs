@@ -48,7 +48,8 @@ class RadarV1Decoder(
         payload.drop(1).chunked(3).forEach { triple ->
             val vid = triple[0].toInt() and 0xFF
             val dist = triple[1].toInt() and 0xFF
-            val flag = triple[2].toInt() and 0xFF
+            // triple[2] is the flag byte; it is not a velocity (values 0/1,
+            // meaning unconfirmed - see PROTOCOL.md) so it is not surfaced.
             if (vid == 0x00 || vid == 0xFD || vid < 0x80) return@forEach
             if (dist == 0xFF) return@forEach
             val id = vid and 0x7F
@@ -56,7 +57,7 @@ class RadarV1Decoder(
             val size = existing?.size ?: VehicleSize.CAR
             val lateral = existing?.lateralPos ?: 0f
             tracks[id] = Track(
-                vehicle = Vehicle(id = id, distanceM = dist, speedMs = flag, size = size, lateralPos = lateral),
+                vehicle = Vehicle(id = id, distanceM = dist, speedMs = null, size = size, lateralPos = lateral),
                 lastSeen = now,
             )
             changed = true

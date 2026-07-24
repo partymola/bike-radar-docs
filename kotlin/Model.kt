@@ -9,12 +9,14 @@ enum class DataSource { NONE, V1, V2 }
 data class Vehicle(
     val id: Int,
     val distanceM: Int,
-    val speedMs: Int,
+    /** Closing speed in m/s (negative = approaching). Null when unknown:
+     *  the V1 stream carries no velocity, so V1 tracks leave this unset. */
+    val speedMs: Int?,
     val size: VehicleSize = VehicleSize.CAR,
     /** -1.0 = full left, 0.0 = same lane / centre, +1.0 = full right */
     val lateralPos: Float = 0f,
 ) {
-    val speedKmh: Int get() = (speedMs * 3.6).toInt()
+    val speedKmh: Int? get() = speedMs?.let { (it * 3.6).toInt() }
 }
 
 data class RadarState(

@@ -108,11 +108,12 @@ class RadarV1DecoderTest {
         assertEquals(0x25, state!!.vehicles[0].id)
     }
 
-    @Test fun flag_byte_passed_through_as_speedMs() {
+    @Test fun v1_has_no_speed() {
         clock = 1000
+        // The V1 flag byte is not a velocity; V1 tracks report unknown speed.
         val state = decoder.feed(packThreat(0x12, listOf(triplet(0x80, 10, 0x01))))
         assertNotNull(state)
-        assertEquals(1, state!!.vehicles[0].speedMs)
+        assertNull(state!!.vehicles[0].speedMs)
     }
 
     @Test fun re_feeding_same_vid_updates_lastSeen() {

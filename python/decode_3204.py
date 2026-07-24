@@ -8,8 +8,10 @@ Wire format per notification:
 
 Header bits:
   bit 0 set -> status/ack frame, no target payload (skip)
-  bit 2 set -> device-status frame (carries the rider's own bike speed in
-               byte[len-1] * 0.25 km/h; otherwise no target payload)
+  bit 2 set -> device-status frame, no target payload. Its last body byte
+               carries the rider's own bike speed at 0.25 m/s per LSB
+               (~0.9 km/h per LSB); see PROTOCOL.md. This reference decoder
+               flags the frame and skips it rather than extracting the speed.
 
 Target struct (9 bytes):
   [0]    uint8  targetId       radar-assigned track ID
