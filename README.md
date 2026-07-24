@@ -1,5 +1,8 @@
 # bike-radar-docs
 
+[![CI](https://github.com/partymola/bike-radar-docs/actions/workflows/ci.yml/badge.svg)](https://github.com/partymola/bike-radar-docs/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 Protocol notes and reference decoders for the `6a4e3200`-family BLE GATT services used by some cycling-radar accessories, written for interoperability with third-party clients.
 
 This repo is a knowledge drop, not a finished product. It documents what the wire looks like and gives minimal, standalone decoders that anyone can run against a captured log. A more complete Android client exists and will be released here in stages.
