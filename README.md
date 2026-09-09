@@ -37,7 +37,7 @@ See [PROTOCOL.md](PROTOCOL.md) for the full byte-level spec.
     `-- README.md           # notes on capture log format + how to gather your own
 ```
 
-The Kotlin sources are taken unchanged from my own Android client and depend only on standard library types. They compile against plain Kotlin/JVM; the JUnit tests run without Android instrumentation.
+The Kotlin sources depend only on standard library types. They compile against plain Kotlin/JVM, and the JUnit tests run without Android instrumentation.
 
 ## Status
 
