@@ -68,3 +68,15 @@ notifications as text.
 Either path produces the same information; this repo's line format is
 the minimum subset the reference decoders need.
 
+## Licence
+
+Everything in this directory is Apache-2.0, Copyright (C) 2026 JJ del Rio:
+the capture logs, their comment lines, and this file. Licence text:
+[LICENSES/Apache-2.0.txt](../LICENSES/Apache-2.0.txt). See the root
+[README.md](../README.md) for how the rest of the repository is licensed.
+
+The samples are here to be run against a decoder, so they travel on the same
+terms as the reference decoders rather than on the repository's. The grant is
+a copyright licence from one author. It does not change the note above about
+device identifiers.
+

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 JJ del Rio
 """Unit tests for decode_3203.parse_heartbeat / is_threat_packet / parse_threat."""
 from __future__ import annotations
 

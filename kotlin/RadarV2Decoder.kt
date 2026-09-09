@@ -1,5 +1,7 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (c) 2026 the bike-radar-docs contributors.
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2026 JJ del Rio
+// Permissive so another project can copy this decoder into its own build.
+// Licence text: LICENSES/Apache-2.0.txt
 package es.jjrh.bikeradar
 
 import kotlin.math.abs

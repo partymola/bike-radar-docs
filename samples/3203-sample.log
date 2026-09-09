@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 JJ del Rio
 # BLE capture log
 # format: <unix_ms> <char_tail> <hex_bytes>
 # already bonded to AA:BB:CC:DD:EE:FF

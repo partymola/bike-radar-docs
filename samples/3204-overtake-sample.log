@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 JJ del Rio
 # bike-radar-docs sample: 3204 V2 target frames during an overtake
 # window: 2 minutes centred on a rear-overtake event
 # contents: ~1150 V2 target frames on char 3204, interleaved with battery

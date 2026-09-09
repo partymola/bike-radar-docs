@@ -21,6 +21,8 @@ See [PROTOCOL.md](PROTOCOL.md) for the full byte-level spec.
 
 ```
 .
+|-- LICENSES/
+|   `-- Apache-2.0.txt      # licence text for the permissively licensed files
 |-- PROTOCOL.md             # authoritative protocol doc
 |-- python/
 |   |-- decode_3203.py      # V1 stream decoder (stdlib-only CLI)
@@ -53,7 +55,9 @@ The Kotlin sources are taken unchanged from my own Android client and depend onl
 
 ## Licence
 
-GPLv3 or later. See [LICENSE](LICENSE).
+GPLv3 or later, Copyright (C) 2026 JJ del Rio. See [LICENSE](LICENSE).
+
+Two parts are Apache-2.0 instead, so another project can copy them into its own build without taking on the GPL: the five reference decoder sources (`kotlin/Model.kt`, `kotlin/RadarV1Decoder.kt`, `kotlin/RadarV2Decoder.kt`, `python/decode_3203.py`, `python/decode_3204.py`), and everything in `samples/`. Licence text: [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt). Every other file is GPLv3 or later, including the tests, the tooling and the protocol notes. The two licence texts themselves carry their own terms.
 
 ## Contributions welcome
 

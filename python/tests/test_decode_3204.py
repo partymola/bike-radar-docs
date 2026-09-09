@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 JJ del Rio
 """Unit tests for decode_3204.parse_target / parse_notification.
 
 Hand-packs synthetic frames covering the 24-bit packed range field
