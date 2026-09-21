@@ -51,7 +51,6 @@ The Kotlin sources depend only on standard library types. They compile against p
 - github.com/rale/radarble is the only public writeup of the V2 `6a4e3204` target struct I have found. No code from that repo was copied; the byte layout here was cross-checked against live captures.
 - github.com/Wunderfitz/harbour-tacho (C++, SailfishOS) is a long-running V1 client; the V1 layout here was cross-checked against its source.
 - github.com/kartoone/mybiketraffic (Monkey C) is a Garmin Connect IQ data-field and the closest public reference to V1 packet behaviour from inside the ConnectIQ radar API. The "V1 third byte = approach speed in m/s (multiply by 3.6 for km/h)" reading cited from it and from other public notes does not match real-road 820 captures, where that byte only ever takes values 0 or 1 (see [PROTOCOL.md](PROTOCOL.md) §V1 threat packet).
-- kartoone has an ongoing developer-forum thread covering the same territory; anyone with follow-up data or corrections is encouraged to participate there as well as opening an issue here.
 
 ## Licence
 
@@ -64,3 +63,5 @@ Two parts are Apache-2.0 instead, so another project can copy them into its own 
 - More captures from other models in this radar family (e.g. RTL515, RTL516) so the GATT-variant table can be filled in.
 - Compatibility reports from other Android devices and from iOS: does the connection sequence in PROTOCOL.md produce the V2 stream on your hardware?
 - Corrections or gaps in PROTOCOL.md.
+
+Open an issue or a pull request here for any of these.
