@@ -5,8 +5,8 @@
 # contents: ~1150 V2 target frames on char 3204, interleaved with battery
 #   reads on 2a19 and a handful of 2811 status notifications.
 #
-# This is the *payload* portion of a RearVue 820 session - the unlock
-# handshake has already happened. Feed each `3204` line through
+# This is the *payload* portion of a RearVue 820 session, taken after
+# the handshake had already happened. Feed each `3204` line through
 # decode_3204.py (python) or RadarV2Decoder.kt (kotlin).
 #
 # Format (same as the rest of samples/):

@@ -9,7 +9,7 @@ Verified on a RearVue 820 connected to a Pixel 10 Pro XL running Android 16. Mos
 3. [GATT services and characteristics](#gatt-services-and-characteristics)
 4. [V1 stream: characteristic `6a4e3203`](#v1-stream-characteristic-6a4e3203)
 5. [V2 stream: characteristic `6a4e3204`](#v2-stream-characteristic-6a4e3204)
-6. [Enabling V2: pairing and pre-handshake sequence](#enabling-v2-pairing-and-pre-handshake-sequence-informally-the-v2-unlock)
+6. [Enabling V2: pairing and pre-handshake sequence](#enabling-v2-pairing-and-pre-handshake-sequence)
 7. [Front-camera light: handshake and mode control](#front-camera-light-handshake-and-mode-control)
 8. [Rear-radar tail-light: mode control](#rear-radar-tail-light-mode-control)
 9. [Subscribing `6a4e3203` early pins V1](#subscribing-6a4e3203-early-pins-v1)
@@ -209,7 +209,7 @@ Observed ceiling: raw 63 (~15.75 m/s, 56.7 km/h), seen as a single-frame peak at
 
 5-byte sparse frames carry the sub-header bytes without the trailing speed byte. Decoders should leave their cached bike-speed unchanged on a sparse frame.
 
-## Enabling V2: pairing and pre-handshake sequence (informally, "the V2 unlock")
+## Enabling V2: pairing and pre-handshake sequence
 
 On the RearVue 820 the `6a4e3204` characteristic will accept a CCCD subscribe without complaint, but the device stays in V1 mode and nothing is ever notified on it. To enable V2 you need two things: a LESC bond, and a specific pre-handshake read-and-subscribe on the standard Battery Service before opening the AMV session.
 
@@ -437,7 +437,7 @@ Opcode `03 29` defines and queries the user-defined custom pattern (type `0x01`)
 
 ### Subscribing `6a4e2f14` does not pin V1
 
-The [V2 enabling notes](#enabling-v2-pairing-and-pre-handshake-sequence-informally-the-v2-unlock) warn that subscribing the `6a4e3203` CCCD can hold the radar in V1 mode. Subscribing `6a4e2f14` does **not** have this effect: enabling its CCCD *after* the V2 handshake, to read tail-light mode-state, left the V2 stream flowing normally. `6a4e3203` is the characteristic to avoid; `6a4e2f14` is safe.
+The [V2 enabling notes](#enabling-v2-pairing-and-pre-handshake-sequence) warn that subscribing the `6a4e3203` CCCD can hold the radar in V1 mode. Subscribing `6a4e2f14` does **not** have this effect: enabling its CCCD *after* the V2 handshake, to read tail-light mode-state, left the V2 stream flowing normally. `6a4e3203` is the characteristic to avoid; `6a4e2f14` is safe.
 
 ## Subscribing `6a4e3203` early pins V1
 
