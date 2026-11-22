@@ -176,7 +176,7 @@ rangeY_m   = rangeYBits * 0.1                                   # ±409.5 m theo
 
 **`rangeY` steps when the size fields lock.** A new track usually reports `lengthMeters` and `widthMeters` as 0 for its first frames. On the frame where they take their template values, `rangeY` steps further back by roughly half the template length, and `speedY` usually shows no matching step. Commute captures held 516 tracks first seen within about 12 m that locked: 469 to 4.00 m by 1.75 m (median step 1.9 m), 45 to 2.00 m by 1.00 m (median 0.9 m) and 2 to 15.00 m by 2.25 m (median 7.7 m). The step was 1.5 m or more on 389 of them, while among the other consecutive frame pairs of tracks first seen that close, only 162 of 49,922 moved back that far. `speedY` was identical across the lock frame on 387 tracks, and 490 locked 0.8-1.2 s after first appearing. Two consequences for a decoder: a range rate computed across the lock reads as a sudden recede, and a distance recorded before the lock reads short of what the same track reports afterwards, by about 2 m for the common template.
 
-**Validation against V1 ground truth.** Decoding 22,804 V2 target frames across three independent commute captures with the formula above produces:
+**Comparison with V1.** Decoding 22,804 V2 target frames across three independent commute captures with the formula above produces:
 
 - Median `|rangeY|` = 30 m, max 220 m. Matches V1's `(median 29 m, max 211 m)` distance distribution within statistical noise.
 - Frame-to-frame median `Δ|rangeY|` = 0.20 m, p98 = 1.70 m. V1 baseline is p98 ≤ 2 m. Trajectories are smooth.
